@@ -6,8 +6,11 @@ Public surface projects use: ``ExternalProcess``, ``WgetDownload``, ``RsyncUploa
 The wget/rsync/curl command-line flags must match what the archiving infra expects, so
 they are fixed; execution is ``asyncio.create_subprocess_exec`` with a retry loop. Two
 deliberate choices:
-  * each subprocess gets ``cwd=item['item_dir']`` directly rather than a process-wide
-    ``os.chdir`` (which would be unsafe with concurrent items);
+  * each subprocess inherits the worker's cwd — the PROJECT directory — so a pipeline's
+    relative assets (``--lua-script youtube.lua``, ``data.txt``, ignore-lists) resolve, just
+    as in the real warrior. Per-item outputs use absolute ``%(item_dir)s`` paths, so a shared
+    cwd is safe across concurrent items (the worker chdirs there once at startup, and runs
+    exactly one project);
   * the child environment is ``os.environ`` overlaid with the task's vars, so PATH/HOME
     are present while every variable a project sets (read by its .lua scripts) is applied.
 """
@@ -91,7 +94,9 @@ class ExternalProcess(Task):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             env=self.build_env(item),
-            cwd=item.get("item_dir") or None,
+            # Inherit the worker's cwd (the project dir) so relative pipeline assets — lua
+            # scripts, data.txt, ignore-lists — resolve; outputs use absolute item_dir paths.
+            cwd=None,
         )
 
         async def feed_stdin() -> None:

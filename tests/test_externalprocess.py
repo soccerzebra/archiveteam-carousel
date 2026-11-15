@@ -148,6 +148,21 @@ def test_retry_on_exit_code_filters():
     assert not any("Retrying" in line for line in item.log)
 
 
+def test_runs_in_inherited_cwd_not_item_dir():
+    # Pipelines keep relative assets (lua scripts, data.txt) in the project dir, so the
+    # subprocess must inherit the worker's cwd — NOT chdir into item_dir (that broke youtube:
+    # wget-at couldn't open youtube.lua). Outputs still use absolute item_dir paths.
+    import os
+    import tempfile
+
+    item = Item()
+    item["item_dir"] = tempfile.mkdtemp()  # a DIFFERENT directory
+    run(ExternalProcess("pwd", ["sh", "-c", "pwd"]), item)
+    printed = [ln.strip() for ln in item.log if ln.strip().startswith("/")]
+    assert printed and printed[-1] == os.getcwd()  # inherited cwd
+    assert printed[-1] != item["item_dir"]  # did NOT cd into item_dir
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:
