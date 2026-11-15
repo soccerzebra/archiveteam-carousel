@@ -1,0 +1,40 @@
+name: catalog-compat
+
+# Deterministically verify that our one shared wget-at build (from docker/Dockerfile.base)
+# can still run every project in the live Warrior HQ catalog. Catches the day ArchiveTeam
+# ships a project needing a newer toolchain than we bake — the job goes red with the specific
+# project + reason, and we bump the base image tag (or move to per-project extraction).
+#
+# Runs weekly and on demand. Needs only Docker (preinstalled on ubuntu-latest) + stdlib.
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"   # Mondays 07:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write           # so a failing scheduled run can open a tracking issue
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check catalog wget-at compatibility
+        id: check
+        run: python3 tools/check_catalog_compat.py --json | tee compat.out
+
+      - name: Open an issue if a project is incompatible
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --title "Catalog wget-at incompatibility detected" \
+            --body "The weekly catalog-compat check failed: a project in the live HQ catalog needs a wget-at our base image doesn't provide. See the run log for the specific project(s) and reason, then bump the base image in docker/Dockerfile.base (or move to per-project extraction).
+
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --label "automated" || true
