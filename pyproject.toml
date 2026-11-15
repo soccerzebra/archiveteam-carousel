@@ -14,8 +14,10 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
     "ruff>=0.6",
     "mypy>=1.11",
+    "pip-tools>=7.4",
 ]
 
 [project.scripts]
@@ -57,6 +59,15 @@ ignore_missing_imports = true
 warn_redundant_casts = true
 warn_unused_ignores = true
 # Non-strict to start. Tighten per-module with [[tool.mypy.overrides]] as code is annotated.
+
+[tool.coverage.run]
+source = ["controlplane", "worker"]
+branch = true
+# worker/seesaw is the project-facing surface exercised via subprocess, not unit tests.
+omit = ["worker/seesaw/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
