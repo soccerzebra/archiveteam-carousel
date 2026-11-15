@@ -1,0 +1,48 @@
+{
+  "_upstream_seesaw_version": "0.10.3",
+  "request_body": {
+    "downloader": "josh",
+    "version": "20261027.01"
+  },
+  "rsync_argv": [
+    "rsync",
+    "-rltv",
+    "--timeout=300",
+    "--contimeout=300",
+    "--progress",
+    "--bwlimit",
+    "0",
+    "--recursive",
+    "--min-size",
+    "1",
+    "--no-compress",
+    "--compress-level",
+    "0",
+    "--files-from=-",
+    "/data/demo/a89f2c1b/data/",
+    "rsync://tracker.example/demo/"
+  ],
+  "rsync_stdin": "demo-20261027-000000-abcd.warc.zst\n",
+  "stats": {
+    "bytes": {},
+    "downloader": "josh",
+    "id": "demo-20261027-000000-abcd",
+    "item": "a89f2c1b",
+    "version": "20261027.01"
+  },
+  "upload_body": {
+    "downloader": "josh",
+    "item_name": "a89f2c1b",
+    "version": "20261027.01"
+  },
+  "wget_argv": [
+    "wget-at",
+    "-o",
+    "/data/demo/a89f2c1b/wget.log",
+    "--warc-file",
+    "/data/demo/a89f2c1b/demo-20261027-000000-abcd",
+    "--warc-header",
+    "x-wget-at-project-name: demo",
+    "https://example.org/"
+  ]
+}
