@@ -10,7 +10,8 @@ from __future__ import annotations
 from typing import Any
 
 from .config import ConfigStore
-from .supervisor import Supervisor
+from .models import PROJECT_THREADS_MAX
+from .supervisor import Supervisor, clamp_threads
 
 
 class ControlPlane:
@@ -48,16 +49,23 @@ class ControlPlane:
 
     def status(self) -> dict:
         gc = self.config.global_config
+        budget = self.supervisor.budget()
+        total_threads = sum(budget.values())
         return {
             "downloader": gc.downloader,
             "warrior_id": gc.warrior_id,
-            "max_concurrent_items": gc.max_concurrent_items,
+            "default_project_threads": gc.default_project_threads,
+            "warn_total_threads": gc.warn_total_threads,
             "max_rsync_threads": gc.max_rsync_threads,
             "bandwidth_limit": gc.bandwidth_limit,
             "http_username": gc.http_username,
             "http_password_set": bool(gc.http_password),
             "http_auth": bool(gc.http_username and gc.http_password),
-            "budget": self.supervisor.budget(),
+            "budget": budget,
+            "total_threads": total_threads,
+            # soft, non-enforced advisory only — never rescales anything
+            "over_warn": bool(gc.warn_total_threads and total_threads > gc.warn_total_threads),
+            "thread_max": PROJECT_THREADS_MAX,
             "workers": [w.model_dump() for w in self.supervisor.snapshot()],
         }
 
@@ -83,13 +91,18 @@ class ControlPlane:
         return {"projects": rows, "enabled": self.config.enabled_projects()}
 
     async def set_enabled(self, name: str, enabled: bool) -> None:
-        self.config.project(name).enabled = enabled
+        pc = self.config.project(name)
+        pc.enabled = enabled
+        # Seed a concrete thread count the first time a project is enabled, so the per-project
+        # value is explicit and editable rather than an implicit fallback.
+        if enabled and not pc.concurrent_items:
+            pc.concurrent_items = clamp_threads(self.config.global_config.default_project_threads)
         self.config.save()
         await self.supervisor.reconcile()
 
     async def set_project_concurrency(self, name: str, concurrent_items: int | None) -> None:
         self.config.project(name).concurrent_items = (
-            int(concurrent_items) if concurrent_items else None
+            clamp_threads(concurrent_items) if concurrent_items else None
         )
         self.config.save()
         await self.supervisor.reconcile()
@@ -101,8 +114,10 @@ class ControlPlane:
         gc = self.config.global_config
         if "downloader" in data:
             gc.downloader = str(data["downloader"]).strip()
-        if "max_concurrent_items" in data:
-            gc.max_concurrent_items = int(data["max_concurrent_items"])
+        if "default_project_threads" in data:
+            gc.default_project_threads = clamp_threads(data["default_project_threads"])
+        if "warn_total_threads" in data:
+            gc.warn_total_threads = max(0, int(data["warn_total_threads"] or 0))
         if "max_rsync_threads" in data:
             gc.max_rsync_threads = int(data["max_rsync_threads"])
         if "bandwidth_limit" in data:
@@ -115,9 +130,9 @@ class ControlPlane:
             gc.http_password = str(data["http_password"])
         if not gc.http_username:
             gc.http_password = ""
-        # per-project concurrency overrides, e.g. {"projects": {"urls": 3}}
+        # per-project thread counts, e.g. {"projects": {"urls": 3}} (clamped 1..MAX)
         for name, ci in (data.get("projects") or {}).items():
-            self.config.project(name).concurrent_items = int(ci) if ci else None
+            self.config.project(name).concurrent_items = clamp_threads(ci) if ci else None
         self.config.save()
         await self.supervisor.reconcile()
 

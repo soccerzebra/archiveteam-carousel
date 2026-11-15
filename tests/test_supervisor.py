@@ -9,7 +9,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from controlplane.config import ConfigStore
 from controlplane.models import ProjectInfo, ProjectSource, WorkerState, WorkerStatus
-from controlplane.supervisor import Supervisor, apply_status_line, split_budget
+from controlplane.supervisor import Supervisor, apply_status_line, clamp_threads
 
 
 class FakeWorker:
@@ -74,10 +74,10 @@ async def _finish_drains(sup):
     await asyncio.gather(*list(sup._drain_tasks))
 
 
-def make_supervisor(tmp_path, downloader="josh", max_items=6):
+def make_supervisor(tmp_path, downloader="josh", default_threads=2):
     config = ConfigStore(pathlib.Path(tmp_path) / "config.json")
     config.global_config.downloader = downloader
-    config.global_config.max_concurrent_items = max_items
+    config.global_config.default_project_threads = default_threads
     sup = Supervisor(config, FakeInstaller(), FakeBackend(), data_dir="/data")
     sup.set_catalog(
         [
@@ -93,16 +93,43 @@ def make_supervisor(tmp_path, downloader="josh", max_items=6):
 # --- pure helpers ------------------------------------------------------------------
 
 
-def test_split_budget_equal():
-    assert split_budget(["a", "b"], 6, {}) == {"a": 3, "b": 3}
+def test_clamp_threads():
+    assert clamp_threads(0) == 1  # floor
+    assert clamp_threads(3) == 3
+    assert clamp_threads(99) == 6  # PROJECT_THREADS_MAX ceiling
 
 
-def test_split_budget_with_override():
-    assert split_budget(["urls", "reddit"], 6, {"urls": 2}) == {"urls": 2, "reddit": 4}
+def test_budget_uses_default_when_unset(tmp_path):
+    config, sup = make_supervisor(tmp_path, default_threads=2)
+    config.project("urls").enabled = True
+    config.project("reddit").enabled = True
+    # absolute per-project: each enabled project gets the default, NOT a divided pie
+    assert sup.budget() == {"urls": 2, "reddit": 2}
 
 
-def test_split_budget_minimum_one():
-    assert split_budget(["a", "b", "c", "d", "e"], 2, {}) == dict.fromkeys("abcde", 1)
+def test_budget_respects_per_project_count(tmp_path):
+    config, sup = make_supervisor(tmp_path, default_threads=2)
+    config.project("urls").enabled = True
+    config.project("reddit").enabled = True
+    config.project("urls").concurrent_items = 5
+    assert sup.budget() == {"urls": 5, "reddit": 2}
+
+
+def test_budget_clamps_to_max(tmp_path):
+    config, sup = make_supervisor(tmp_path)
+    config.project("urls").enabled = True
+    config.project("urls").concurrent_items = 99
+    assert sup.budget() == {"urls": 6}
+
+
+def test_budget_disabling_does_not_grow_others(tmp_path):
+    # the safety property: a disabled project never adds threads to a survivor
+    config, sup = make_supervisor(tmp_path, default_threads=2)
+    config.project("urls").enabled = True
+    config.project("reddit").enabled = True
+    assert sup.budget()["urls"] == 2
+    config.project("reddit").enabled = False
+    assert sup.budget() == {"urls": 2}  # urls unchanged
 
 
 def test_apply_status_line_progression():
@@ -160,8 +187,8 @@ async def test_reconcile_starts_enabled_projects(tmp_path):
     config.project("reddit").enabled = True
     await sup.reconcile()
     assert set(sup.workers) == {"urls", "reddit"}
-    # 6 items split across 2 projects => 3 each
-    assert {p: ci for p, ci, _ in sup.backend.spawns} == {"urls": 3, "reddit": 3}
+    # absolute per-project: each gets the default (2), not a divided pie
+    assert {p: ci for p, ci, _ in sup.backend.spawns} == {"urls": 2, "reddit": 2}
 
 
 async def test_reconcile_stops_disabled_project(tmp_path):
@@ -174,9 +201,9 @@ async def test_reconcile_stops_disabled_project(tmp_path):
     config.project("reddit").enabled = False
     await sup.reconcile()
     assert set(sup.workers) == {"urls"}
-    # urls is alone now => gets the whole budget of 6, applied live (same worker, no respawn).
+    # urls keeps its OWN count (2) — disabling reddit never grows it. Same worker, no respawn.
     assert sup.workers["urls"] is urls
-    assert urls.concurrent_items == 6
+    assert urls.concurrent_items == 2
     assert len(sup.backend.spawns) == 2  # urls + reddit started once each; urls not respawned
     # reddit drains in the background, then is stopped and released.
     await _finish_drains(sup)
@@ -184,17 +211,17 @@ async def test_reconcile_stops_disabled_project(tmp_path):
     assert pathlib.Path("/versions/reddit") in sup.installer.released
 
 
-async def test_reconcile_reconfigures_on_budget_change(tmp_path):
-    config, sup = make_supervisor(tmp_path, max_items=6)
+async def test_reconcile_reconfigures_on_thread_change(tmp_path):
+    config, sup = make_supervisor(tmp_path, default_threads=2)
     config.project("urls").enabled = True
     await sup.reconcile()
     worker = sup.workers["urls"]
-    assert worker.concurrent_items == 6
-    config.global_config.max_concurrent_items = 2
+    assert worker.concurrent_items == 2
+    config.project("urls").concurrent_items = 5
     await sup.reconcile()
     # Same process, reconfigured live: in-flight items keep running.
     assert sup.workers["urls"] is worker
-    assert worker.concurrent_items == 2
+    assert worker.concurrent_items == 5
     assert len(sup.backend.spawns) == 1  # never respawned
 
 
@@ -241,22 +268,22 @@ async def test_check_updates_restarts_stale_worker(tmp_path):
 
 
 async def test_download_rate_splits_global_limit(tmp_path):
-    config, sup = make_supervisor(tmp_path, max_items=6)
+    config, sup = make_supervisor(tmp_path, default_threads=2)
     config.global_config.bandwidth_limit = 0
     assert sup.download_rate() == 0  # unlimited by default
     config.project("urls").enabled = True
     config.project("reddit").enabled = True
-    config.global_config.bandwidth_limit = 6_000_000  # 6 MB/s across 6 slots (3 + 3)
+    config.global_config.bandwidth_limit = 4_000_000  # 4 MB/s across 4 slots (2 + 2)
     assert sup.download_rate() == 1_000_000
 
 
 async def test_bandwidth_change_reconfigures_workers(tmp_path):
-    config, sup = make_supervisor(tmp_path, max_items=4)
+    config, sup = make_supervisor(tmp_path, default_threads=2)
     config.project("urls").enabled = True
     await sup.reconcile()
     worker = sup.workers["urls"]
     assert worker.limit_rate == 0
-    config.global_config.bandwidth_limit = 4_000_000  # 4 MB/s over 4 slots => 1 MB/s each
+    config.global_config.bandwidth_limit = 2_000_000  # 2 MB/s over 2 slots => 1 MB/s each
     await sup.reconcile()
     assert sup.workers["urls"] is worker  # applied live, not restarted
     assert worker.limit_rate == 1_000_000

@@ -107,10 +107,12 @@ def test_enable_disable_roundtrip(tmp_path):
 def test_settings_update_persists_and_reconciles(tmp_path):
     client, cp = make_client(tmp_path)
     with client:
-        r = client.post("/api/settings", json={"downloader": "newname", "max_concurrent_items": 10})
+        r = client.post(
+            "/api/settings", json={"downloader": "newname", "default_project_threads": 3}
+        )
     assert r.status_code == 200
     assert cp.config.global_config.downloader == "newname"
-    assert cp.config.global_config.max_concurrent_items == 10
+    assert cp.config.global_config.default_project_threads == 3
     # persisted to disk
     reloaded = ConfigStore(cp.config.path)
     reloaded.load()
@@ -188,7 +190,7 @@ def test_blank_password_keeps_existing_and_clearing_user_disables(tmp_path):
         # a save with a blank password keeps the stored one (UI never echoes it back)
         r = client.post(
             "/api/settings",
-            json={"max_concurrent_items": 5, "http_username": "bob", "http_password": ""},
+            json={"default_project_threads": 5, "http_username": "bob", "http_password": ""},
             headers=auth,
         )
         assert r.status_code == 200

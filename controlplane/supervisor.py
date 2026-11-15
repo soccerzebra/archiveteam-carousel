@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Protocol
 
 from .config import ConfigStore
-from .models import ItemStatus, ProjectInfo, WorkerState, WorkerStatus
+from .models import PROJECT_THREADS_MAX, ItemStatus, ProjectInfo, WorkerState, WorkerStatus
 from .projects import ProjectInstaller
 
 
@@ -72,26 +72,9 @@ def apply_status_line(status: WorkerStatus, line: str) -> dict | None:
     return event
 
 
-def split_budget(projects: list[str], total: int, overrides: dict[str, int]) -> dict[str, int]:
-    """Divide ``total`` concurrent items across ``projects`` (equal split, min 1 each).
-
-    A per-project override wins for that project; the remaining total is split among the
-    rest. This is deliberately simple; weighting by HQ priority can come later.
-    """
-    if not projects:
-        return {}
-    budget: dict[str, int] = {}
-    free = [p for p in projects if p not in overrides]
-    for p in projects:
-        if p in overrides:
-            budget[p] = max(1, overrides[p])
-    used = sum(budget.values())
-    remaining = max(0, total - used)
-    if free:
-        each = max(1, remaining // len(free))
-        for p in free:
-            budget[p] = each
-    return budget
+def clamp_threads(value: int) -> int:
+    """Clamp a per-project thread count to the allowed 1..PROJECT_THREADS_MAX range."""
+    return max(1, min(PROJECT_THREADS_MAX, int(value)))
 
 
 class WorkerHandle(Protocol):
@@ -275,9 +258,17 @@ class Supervisor:
         return [n for n in self.config.enabled_projects() if n in self.catalog]
 
     def budget(self) -> dict[str, int]:
-        desired = self._desired()
-        overrides = {n: ci for n in desired if (ci := self.config.project(n).concurrent_items)}
-        return split_budget(desired, self.config.global_config.max_concurrent_items, overrides)
+        """Per-project thread counts — absolute, not a divided global pie.
+
+        Each enabled project runs its own ``concurrent_items`` (clamped 1..MAX), falling back
+        to ``default_project_threads`` when unset. Disabling a project never changes another's
+        count, so a rate-limited project can never be pushed above its configured threads.
+        """
+        default = self.config.global_config.default_project_threads
+        return {
+            n: clamp_threads(self.config.project(n).concurrent_items or default)
+            for n in self._desired()
+        }
 
     def download_rate(self) -> int:
         """Per-download byte/sec cap: the global limit split across every active slot.

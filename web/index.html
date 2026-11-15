@@ -102,6 +102,7 @@
   .threadtbl col.c-data { width:120px; }   /* c-log takes the rest */
   .tstep { background:var(--chip); border-radius:5px; padding:1px 7px; font-size:11px; }
   .tstep.rest { color:var(--warn); background:rgba(154,103,0,.12); white-space:nowrap; }
+  .tile .v.warn { color:var(--warn); }
   .tlog .rest { font-style:italic; color:var(--muted); }
   .tlog { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:11px;
           line-height:1.45; color:var(--muted); white-space:pre-wrap; word-break:break-word;
@@ -292,9 +293,14 @@
         <div class="card">
           <h2>Resources</h2>
           <div class="field">
-            <label for="maxItems">Max concurrent items (global budget)</label>
-            <input type="number" id="maxItems" min="1" style="max-width:120px">
-            <span class="hint">Divided across all enabled projects.</span>
+            <label for="defThreads">Default threads per project</label>
+            <input type="number" id="defThreads" min="1" max="6" style="max-width:120px">
+            <span class="hint">Applied to each project the first time you enable it (max 6, ArchiveTeam's per-project ceiling). Set each project's own count on the Projects page.</span>
+          </div>
+          <div class="field">
+            <label for="warnThreads">Warn above total threads</label>
+            <input type="number" id="warnThreads" min="0" style="max-width:120px">
+            <span class="hint">Advisory only — flags when total running threads exceed this. 0 = off. Never changes any project's count.</span>
           </div>
           <div class="field">
             <label for="bwLimit">Bandwidth limit</label>
@@ -427,7 +433,8 @@ function renderStatus(s) {
   const set = (id, val) => { const e = document.getElementById(id);
     if (document.activeElement !== e) e.value = val; };
   set('downloader', s.downloader || '');
-  set('maxItems', s.max_concurrent_items || '');
+  set('defThreads', s.default_project_threads || '');
+  set('warnThreads', s.warn_total_threads || '');
   set('rsyncThreads', s.max_rsync_threads || '');
   set('httpUser', s.http_username || '');
   if (document.activeElement.id !== 'bwLimit')
@@ -440,8 +447,12 @@ function renderStatus(s) {
 
   const ws = s.workers || [];
   document.getElementById('tActive').textContent = ws.filter(w => w.state === 'running').length;
-  document.getElementById('tThreads').textContent =
-    ws.filter(w => w.state === 'running').reduce((a, w) => a + (w.concurrent_items || 0), 0);
+  const runningThreads = (s.total_threads != null) ? s.total_threads
+    : ws.filter(w => w.state === 'running').reduce((a, w) => a + (w.concurrent_items || 0), 0);
+  const tThreadsEl = document.getElementById('tThreads');
+  tThreadsEl.textContent = runningThreads;
+  tThreadsEl.classList.toggle('warn', !!s.over_warn);
+  tThreadsEl.title = s.over_warn ? `Above your warning threshold of ${s.warn_total_threads} threads` : '';
 
   const tb = document.getElementById('workers');
   tb.innerHTML = ws.length ? '' : '<tr><td colspan="7" class="empty">No workers running.</td></tr>';
@@ -494,8 +505,8 @@ function renderProjects(p) {
         <div class="meta">${esc(proj.name)}</div>
       </div>
       ${on ? `<label class="meta">threads
-        <input type="number" min="1" style="width:66px" value="${proj.concurrent_items || ''}"
-          placeholder="auto" data-conc="${esc(proj.name)}"></label>` : ''}`;
+        <input type="number" min="1" max="6" style="width:66px" value="${proj.concurrent_items || ''}"
+          placeholder="${(lastStatus && lastStatus.default_project_threads) || 1}" data-conc="${esc(proj.name)}"></label>` : ''}`;
     box.appendChild(div);
   }
   box.querySelectorAll('input[data-name]').forEach(cb => cb.onchange = async () => {
@@ -526,7 +537,8 @@ document.getElementById('saveSettings').onclick = async (e) => {
     const r = await fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
         downloader: document.getElementById('downloader').value,
-        max_concurrent_items: Number(document.getElementById('maxItems').value) || 1,
+        default_project_threads: Number(document.getElementById('defThreads').value) || 1,
+        warn_total_threads: Number(document.getElementById('warnThreads').value) || 0,
         max_rsync_threads: Number(document.getElementById('rsyncThreads').value) || 1,
         bandwidth_limit: Math.round((Number(document.getElementById('bwLimit').value) || 0) * 1e6),
         http_username: document.getElementById('httpUser').value,

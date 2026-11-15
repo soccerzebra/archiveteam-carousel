@@ -11,6 +11,9 @@ import enum
 
 from pydantic import BaseModel
 
+# ArchiveTeam's warrior caps each project at 6 concurrent items; we match that ceiling.
+PROJECT_THREADS_MAX = 6
+
 
 class ProjectSource(str, enum.Enum):
     GIT = "git"
@@ -78,8 +81,14 @@ class GlobalConfig(BaseModel):
     warrior_id: str = ""  # assigned by HQ
     http_username: str = ""
     http_password: str = ""
-    # Global resource budget, divided across active projects by the supervisor:
-    max_concurrent_items: int = 6
+    # Thread allocation. Per-project thread counts (ProjectConfig.concurrent_items) are
+    # ABSOLUTE and authoritative — never auto-grown — so disabling a project can only reduce
+    # total load, never push a rate-limited project higher. ``default_project_threads`` seeds a
+    # project the first time it's enabled. ``warn_total_threads`` is a soft, non-enforced
+    # advisory: the UI flags when the sum of running threads exceeds it (0 = no warning). It
+    # NEVER rescales a project.
+    default_project_threads: int = 1
+    warn_total_threads: int = 0
     max_rsync_threads: int = 20
     # Global download rate cap in bytes/sec (0 = unlimited). The supervisor divides this
     # across all active download slots and passes each worker its per-download share.
@@ -94,5 +103,7 @@ class ProjectConfig(BaseModel):
 
     project: str
     enabled: bool = False
-    concurrent_items: int | None = None  # override of the auto-divided budget
+    # Absolute per-project thread count (concurrent items), 1..PROJECT_THREADS_MAX. None means
+    # "not set yet" — the supervisor falls back to GlobalConfig.default_project_threads.
+    concurrent_items: int | None = None
     values: dict[str, str] = {}  # pipeline-declared config values
