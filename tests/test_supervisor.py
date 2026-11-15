@@ -1,6 +1,7 @@
 """Supervisor tests: budget split, status-line parsing, and reconcile — with fake backend
 and fake installer, so no real subprocesses, git, or network."""
 
+import asyncio
 import pathlib
 import sys
 
@@ -18,11 +19,21 @@ class FakeWorker:
         self.concurrent_items = concurrent_items
         self.limit_rate = limit_rate
         self.stopped = False
+        self._gate = None  # when set, stop() blocks until release_stop() — models a slow drain
         self.status = WorkerStatus(
             project=project, state=WorkerState.RUNNING, concurrent_items=concurrent_items
         )
 
-    async def stop(self, graceful=True):
+    def block_stop(self):
+        self._gate = asyncio.Event()
+
+    def release_stop(self):
+        if self._gate is not None:
+            self._gate.set()
+
+    async def stop(self, graceful=True, timeout=30.0):
+        if self._gate is not None:
+            await self._gate.wait()
         self.stopped = True
 
     async def reconfigure(self, concurrent_items, limit_rate=0):
@@ -56,6 +67,11 @@ class FakeInstaller:
 
     def release(self, version_dir):
         self.released.append(version_dir)
+
+
+async def _finish_drains(sup):
+    """Wait for all background drain tasks to complete (release their version dirs)."""
+    await asyncio.gather(*list(sup._drain_tasks))
 
 
 def make_supervisor(tmp_path, downloader="josh", max_items=6):
@@ -158,12 +174,14 @@ async def test_reconcile_stops_disabled_project(tmp_path):
     config.project("reddit").enabled = False
     await sup.reconcile()
     assert set(sup.workers) == {"urls"}
-    assert reddit.stopped is True
-    assert pathlib.Path("/versions/reddit") in sup.installer.released
     # urls is alone now => gets the whole budget of 6, applied live (same worker, no respawn).
     assert sup.workers["urls"] is urls
     assert urls.concurrent_items == 6
     assert len(sup.backend.spawns) == 2  # urls + reddit started once each; urls not respawned
+    # reddit drains in the background, then is stopped and released.
+    await _finish_drains(sup)
+    assert reddit.stopped is True
+    assert pathlib.Path("/versions/reddit") in sup.installer.released
 
 
 async def test_reconcile_reconfigures_on_budget_change(tmp_path):
@@ -216,8 +234,9 @@ async def test_check_updates_restarts_stale_worker(tmp_path):
     await sup.check_updates()
     assert sup.workers["urls"] is not original  # restarted on update
     assert len(sup.backend.spawns) == 2
-    # Code update IS destructive: old version released, new code re-prepared.
+    # Code update IS destructive: new code re-prepared, old version released after it drains.
     assert sup.installer.prepared == ["urls", "urls"]
+    await _finish_drains(sup)
     assert pathlib.Path("/versions/urls") in sup.installer.released
 
 
@@ -242,6 +261,73 @@ async def test_bandwidth_change_reconfigures_workers(tmp_path):
     assert sup.workers["urls"] is worker  # applied live, not restarted
     assert worker.limit_rate == 1_000_000
     assert len(sup.backend.spawns) == 1
+
+
+async def test_disable_drains_in_background_then_releases(tmp_path):
+    config, sup = make_supervisor(tmp_path)
+    config.project("urls").enabled = True
+    await sup.reconcile()
+    worker = sup.workers["urls"]
+    worker.block_stop()  # model a slow-draining worker (item still in flight)
+
+    config.project("urls").enabled = False
+    await sup.reconcile()  # must return promptly, without waiting for the drain
+    assert "urls" not in sup.workers
+    assert worker in sup._draining
+    assert worker.stopped is False  # still draining
+    assert sup.installer.released == []  # NOT released while the process is alive
+
+    worker.release_stop()  # item finished; process exits
+    await _finish_drains(sup)
+    assert worker.stopped is True
+    assert worker not in sup._draining
+    assert pathlib.Path("/versions/urls") in sup.installer.released
+
+
+async def test_reenable_during_drain_starts_fresh_worker(tmp_path):
+    config, sup = make_supervisor(tmp_path)
+    config.project("urls").enabled = True
+    await sup.reconcile()
+    old = sup.workers["urls"]
+    old.block_stop()
+
+    config.project("urls").enabled = False
+    await sup.reconcile()
+    assert old in sup._draining and "urls" not in sup.workers
+
+    config.project("urls").enabled = True
+    await sup.reconcile()  # a fresh worker starts while the old one is still draining
+    assert "urls" in sup.workers
+    assert sup.workers["urls"] is not old
+    assert old in sup._draining  # old copy keeps finishing its items
+
+    old.release_stop()
+    await _finish_drains(sup)
+    assert sup.workers["urls"] is not old  # fresh worker unaffected
+
+
+async def test_stop_all_stops_active_and_draining(tmp_path):
+    config, sup = make_supervisor(tmp_path)
+    config.project("urls").enabled = True
+    config.project("reddit").enabled = True
+    await sup.reconcile()
+    urls = sup.workers["urls"]
+    reddit = sup.workers["reddit"]
+    reddit.block_stop()  # keep reddit in the draining set until shutdown forces it
+    config.project("reddit").enabled = False
+    await sup.reconcile()
+    assert reddit in sup._draining
+
+    reddit.release_stop()  # let shutdown's stop() complete rather than hang on the gate
+    await sup.stop_all()
+    assert sup.workers == {}
+    assert sup._draining == set()
+    assert urls.stopped is True and reddit.stopped is True
+    # each version dir released exactly once (no double release across drain + shutdown)
+    assert sorted(sup.installer.released) == [
+        pathlib.Path("/versions/reddit"),
+        pathlib.Path("/versions/urls"),
+    ]
 
 
 async def test_snapshot_reports_all_workers(tmp_path):

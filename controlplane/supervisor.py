@@ -100,7 +100,7 @@ class WorkerHandle(Protocol):
     limit_rate: int
     version_dir: Path
 
-    async def stop(self, graceful: bool = True) -> None: ...
+    async def stop(self, graceful: bool = True, timeout: float | None = 30.0) -> None: ...
     async def reconfigure(self, concurrent_items: int, limit_rate: int = 0) -> None: ...
     def snapshot(self) -> WorkerStatus: ...
 
@@ -156,17 +156,27 @@ class SubprocessWorker:
         if returncode not in (0, -signal.SIGINT, -signal.SIGTERM):
             self.status.last_error = f"worker exited with code {returncode}"
 
-    async def stop(self, graceful: bool = True) -> None:
+    async def stop(self, graceful: bool = True, timeout: float | None = 30.0) -> None:
+        """Signal the worker and wait for it to exit.
+
+        ``graceful`` sends SIGINT (the worker drains: finishes in-flight items, stops taking
+        new ones, exits); otherwise SIGTERM. ``timeout`` caps the wait before a hard SIGKILL;
+        ``None`` waits indefinitely (used for drain-to-completion on retire).
+        """
         self.status.state = WorkerState.STOPPING
         try:
             self._proc.send_signal(signal.SIGINT if graceful else signal.SIGTERM)
         except ProcessLookupError:
             return
         try:
-            await asyncio.wait_for(self._proc.wait(), timeout=30)
+            if timeout is None:
+                await self._proc.wait()
+            else:
+                await asyncio.wait_for(self._proc.wait(), timeout=timeout)
         except TimeoutError:
             self._proc.kill()
-        self._reader.cancel()
+        finally:
+            self._reader.cancel()
 
     async def reconfigure(self, concurrent_items: int, limit_rate: int = 0) -> None:
         """Change the running worker's slot count / bandwidth live, without a restart.
@@ -241,13 +251,21 @@ class Supervisor:
         installer: ProjectInstaller,
         backend: WorkerBackend,
         data_dir: str = "/home/warrior/data",
+        drain_timeout: float | None = 3600.0,
     ):
         self.config = config
         self.installer = installer
         self.backend = backend
         self.data_dir = data_dir
+        # Disabled / updated workers drain in the background (finish in-flight items) rather
+        # than block reconcile. drain_timeout caps a wedged worker before a hard kill so it
+        # can't leak a process + version-dir reference forever; None = wait indefinitely.
+        self.drain_timeout = drain_timeout
         self.workers: dict[str, WorkerHandle] = {}
         self.catalog: dict[str, ProjectInfo] = {}
+        self._draining: set[WorkerHandle] = set()
+        self._drain_tasks: set[asyncio.Task[None]] = set()
+        self._shutting_down = False
         self._lock = asyncio.Lock()
 
     def set_catalog(self, projects: list[ProjectInfo]) -> None:
@@ -276,17 +294,17 @@ class Supervisor:
     async def reconcile(self) -> None:
         """Make running workers match the enabled set and the current budget."""
         async with self._lock:
-            # No downloader identity => can't run anything; stop everything and wait.
+            # No downloader identity => can't run anything; drain everything and wait.
             if not self.config.global_config.downloader:
                 for name in list(self.workers):
-                    await self._stop(name)
+                    self._retire(name)
                 return
             desired = self._desired()
             budget = self.budget()
             rate = self.download_rate()
             for name in list(self.workers):
                 if name not in desired:
-                    await self._stop(name)
+                    self._retire(name)
             for name in desired:
                 want = budget.get(name, 1)
                 current = self.workers.get(name)
@@ -305,10 +323,11 @@ class Supervisor:
         return worker.snapshot().state in (WorkerState.FAILED, WorkerState.STOPPED)
 
     async def restart(self, name: str) -> None:
-        """Operator-triggered restart of one project (stop, then reconcile brings it back)."""
+        """Operator-triggered restart of one project: retire the old instance (it drains in
+        the background), then reconcile brings up a fresh one."""
         async with self._lock:
             if name in self.workers:
-                await self._stop(name)
+                self._retire(name)
         await self.reconcile()
 
     async def check_updates(self) -> None:
@@ -320,7 +339,7 @@ class Supervisor:
                 if info and await self.installer.has_update(info, worker.version_dir):
                     stale.append(name)
             for name in stale:
-                await self._stop(name)
+                self._retire(name)
         if stale:
             await self.reconcile()
 
@@ -353,16 +372,42 @@ class Supervisor:
         await old.stop()
         await self._spawn(name, old.version_dir, concurrent_items, limit_rate)
 
-    async def _stop(self, name: str) -> None:
-        """Stop a worker and release its version dir (used for disable / code-update)."""
+    def _retire(self, name: str) -> None:
+        """Remove a worker from the active set and let it drain in the background.
+
+        The worker finishes its in-flight items (graceful SIGINT) on its own timeline, so
+        reconcile never blocks on the drain. Its version dir is released only once the
+        process has actually exited (in ``_drain``), which also avoids deleting code out from
+        under a still-running worker.
+        """
         worker = self.workers.pop(name)
-        await worker.stop()
-        self.installer.release(worker.version_dir)
+        self._draining.add(worker)
+        task = asyncio.create_task(self._drain(worker))
+        self._drain_tasks.add(task)
+        task.add_done_callback(self._drain_tasks.discard)
+
+    async def _drain(self, worker: WorkerHandle) -> None:
+        try:
+            await worker.stop(graceful=True, timeout=self.drain_timeout)
+        finally:
+            self._draining.discard(worker)
+            # During shutdown, stop_all owns the release so it happens exactly once.
+            if not self._shutting_down:
+                self.installer.release(worker.version_dir)
 
     def snapshot(self) -> list[WorkerStatus]:
         return [w.snapshot() for w in self.workers.values()]
 
     async def stop_all(self, graceful: bool = True) -> None:
+        """Shut everything down with a bounded wait — active and still-draining workers."""
+        self._shutting_down = True  # _drain tasks stop releasing; stop_all releases once
+        for task in list(self._drain_tasks):
+            task.cancel()
         async with self._lock:
-            for name in list(self.workers):
-                await self._stop(name)
+            workers = [*self.workers.values(), *self._draining]
+            self.workers.clear()
+            self._draining.clear()
+        for worker in workers:
+            with contextlib.suppress(Exception):
+                await worker.stop(graceful=graceful, timeout=30.0)
+            self.installer.release(worker.version_dir)
