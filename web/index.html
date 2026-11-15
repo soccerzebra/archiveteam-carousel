@@ -102,7 +102,6 @@
   .threadtbl col.c-data { width:120px; }   /* c-log takes the rest */
   .tstep { background:var(--chip); border-radius:5px; padding:1px 7px; font-size:11px; }
   .tstep.rest { color:var(--warn); background:rgba(154,103,0,.12); white-space:nowrap; }
-  .tile .v.warn { color:var(--warn); }
   .tlog .rest { font-style:italic; color:var(--muted); }
   .tlog { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:11px;
           line-height:1.45; color:var(--muted); white-space:pre-wrap; word-break:break-word;
@@ -313,11 +312,6 @@
             <span class="hint">Applied to each project the first time you enable it (max 6, ArchiveTeam's per-project ceiling). Set each project's own count on the Projects page.</span>
           </div>
           <div class="field">
-            <label for="warnThreads">Warn above total threads</label>
-            <input type="number" id="warnThreads" min="0" style="max-width:120px">
-            <span class="hint">Advisory only — flags when total running threads exceed this. 0 = off. Never changes any project's count.</span>
-          </div>
-          <div class="field">
             <label for="bwLimit">Bandwidth limit</label>
             <div class="inline">
               <input type="number" id="bwLimit" min="0" step="0.1" style="width:110px"> MB/s
@@ -449,7 +443,6 @@ function renderStatus(s) {
     if (document.activeElement !== e) e.value = val; };
   set('downloader', s.downloader || '');
   set('defThreads', s.default_project_threads || '');
-  set('warnThreads', s.warn_total_threads || '');
   set('rsyncThreads', s.max_rsync_threads || '');
   set('httpUser', s.http_username || '');
   const atc = document.getElementById('atChoice');
@@ -472,10 +465,7 @@ function renderStatus(s) {
   document.getElementById('tActive').textContent = ws.filter(w => w.state === 'running').length;
   const runningThreads = (s.total_threads != null) ? s.total_threads
     : ws.filter(w => w.state === 'running').reduce((a, w) => a + (w.concurrent_items || 0), 0);
-  const tThreadsEl = document.getElementById('tThreads');
-  tThreadsEl.textContent = runningThreads;
-  tThreadsEl.classList.toggle('warn', !!s.over_warn);
-  tThreadsEl.title = s.over_warn ? `Above your warning threshold of ${s.warn_total_threads} threads` : '';
+  document.getElementById('tThreads').textContent = runningThreads;
 
   const tb = document.getElementById('workers');
   tb.innerHTML = ws.length ? '' : '<tr><td colspan="7" class="empty">No workers running.</td></tr>';
@@ -567,7 +557,6 @@ document.getElementById('saveSettings').onclick = async (e) => {
       body: JSON.stringify({
         downloader: document.getElementById('downloader').value,
         default_project_threads: Number(document.getElementById('defThreads').value) || 1,
-        warn_total_threads: Number(document.getElementById('warnThreads').value) || 0,
         max_rsync_threads: Number(document.getElementById('rsyncThreads').value) || 1,
         bandwidth_limit: Math.round((Number(document.getElementById('bwLimit').value) || 0) * 1e6),
         http_username: document.getElementById('httpUser').value,

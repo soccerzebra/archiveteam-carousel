@@ -65,7 +65,6 @@ class ControlPlane:
             "archiveteam_choice": gc.archiveteam_choice,
             "auto_projects": list(self._auto_projects),
             "default_project_threads": gc.default_project_threads,
-            "warn_total_threads": gc.warn_total_threads,
             "max_rsync_threads": gc.max_rsync_threads,
             "bandwidth_limit": gc.bandwidth_limit,
             "http_username": gc.http_username,
@@ -73,8 +72,6 @@ class ControlPlane:
             "http_auth": bool(gc.http_username and gc.http_password),
             "budget": budget,
             "total_threads": total_threads,
-            # soft, non-enforced advisory only — never rescales anything
-            "over_warn": bool(gc.warn_total_threads and total_threads > gc.warn_total_threads),
             "thread_max": PROJECT_THREADS_MAX,
             "workers": [w.model_dump() for w in self.supervisor.snapshot()],
         }
@@ -132,8 +129,6 @@ class ControlPlane:
             self._apply_choice()  # apply from the last heartbeat's picks; next beat refreshes
         if "default_project_threads" in data:
             gc.default_project_threads = clamp_threads(data["default_project_threads"])
-        if "warn_total_threads" in data:
-            gc.warn_total_threads = max(0, int(data["warn_total_threads"] or 0))
         if "max_rsync_threads" in data:
             gc.max_rsync_threads = int(data["max_rsync_threads"])
         if "bandwidth_limit" in data:

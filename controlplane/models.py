@@ -84,11 +84,8 @@ class GlobalConfig(BaseModel):
     # Thread allocation. Per-project thread counts (ProjectConfig.concurrent_items) are
     # ABSOLUTE and authoritative — never auto-grown — so disabling a project can only reduce
     # total load, never push a rate-limited project higher. ``default_project_threads`` seeds a
-    # project the first time it's enabled. ``warn_total_threads`` is a soft, non-enforced
-    # advisory: the UI flags when the sum of running threads exceeds it (0 = no warning). It
-    # NEVER rescales a project.
+    # project the first time it's enabled.
     default_project_threads: int = 2  # matches ArchiveTeam's warrior default
-    warn_total_threads: int = 0
     max_rsync_threads: int = 20
     # "ArchiveTeam's Choice": when true, the projects HQ currently prioritizes are force-run
     # (at default_project_threads) ON TOP OF the user's manual selection, and refreshed on the
