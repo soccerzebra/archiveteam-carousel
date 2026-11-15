@@ -126,6 +126,32 @@ def test_runner_survives_item_failure():
     assert runner.completed == 2 and runner.failed == 1
 
 
+def test_on_finish_fires_on_success_and_failure():
+    finished = []
+
+    class Claim(Task):
+        def __init__(self):
+            super().__init__("claim")
+            self.n = 0
+
+        async def run(self, item, ctx):
+            if self.n >= 2:
+                raise GracefulStop
+            self.n += 1
+            item["n"] = self.n
+            item.on_finish += lambda it: finished.append((it["n"], it.state))
+
+    class MaybeFail(Task):
+        async def run(self, item, ctx):
+            if item["n"] == 2:
+                raise RuntimeError("boom")
+
+    runner = Runner(Pipeline(Claim(), MaybeFail("mf")), concurrent_items=1, ctx=CTX, fail_delay=0)
+    asyncio.run(runner.run())
+    assert (1, Item.COMPLETED) in finished  # fired on success
+    assert (2, Item.FAILED) in finished  # and on failure
+
+
 def test_runner_seeds_data_dir_on_each_item():
     seen = {}
 

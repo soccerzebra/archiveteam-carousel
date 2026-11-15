@@ -184,6 +184,7 @@ class Runner:
                 return
             except asyncio.CancelledError:
                 item.cancel()
+                item.on_finish.fire(item)
                 self._thread_end(index)
                 raise
             except Exception as exc:  # a task failed this item; keep the worker alive
@@ -191,6 +192,7 @@ class Runner:
                 self.failed += 1
                 item.last_error = f"{type(exc).__name__}: {exc}"
                 item.log_output(f"Item failed: {exc!r}")
+                item.on_finish.fire(item)  # cleanup hooks run on failure too
                 self._thread_end(index)
                 self._notify(item)
                 if self.fail_delay:
@@ -199,6 +201,7 @@ class Runner:
             if item.state == Item.RUNNING:
                 item.state = Item.COMPLETED
             self.completed += 1
+            item.on_finish.fire(item)
             self._thread_end(index)
             self._notify(item)
 

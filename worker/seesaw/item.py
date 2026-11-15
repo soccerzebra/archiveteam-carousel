@@ -10,6 +10,7 @@ item won't have until runtime.
 
 from __future__ import annotations
 
+import sys
 import uuid
 from typing import Any
 
@@ -47,6 +48,32 @@ class ItemInterpolation:
         return f"<'{self.format_string}'>"
 
 
+class Event:
+    """Minimal seesaw-style event: ``item.on_finish += handler`` registers, ``fire(item)``
+    calls each handler. Handlers are isolated so one raising can't abort the others."""
+
+    def __init__(self) -> None:
+        self._handlers: list[Any] = []
+
+    def __iadd__(self, handler: Any) -> Event:
+        self._handlers.append(handler)
+        return self
+
+    def __isub__(self, handler: Any) -> Event:
+        if handler in self._handlers:
+            self._handlers.remove(handler)
+        return self
+
+    def fire(self, *args: Any, **kwargs: Any) -> None:
+        for handler in list(self._handlers):
+            try:
+                handler(*args, **kwargs)
+            except Exception as exc:  # a finish-hook failure must not sink the item
+                print(f"[event] handler {handler!r} raised: {exc!r}", file=sys.stderr)
+
+    __call__ = fire
+
+
 class Item(dict):
     """A work item: a property mapping plus runtime bookkeeping.
 
@@ -68,6 +95,9 @@ class Item(dict):
         self.canceled = False
         self.last_error: str | None = None
         self.log: list[str] = []
+        # Fired once when the item finishes (success OR failure); pipelines register cleanup
+        # here, e.g. instagram releasing its cookie file (`item.on_finish += release_cookie`).
+        self.on_finish = Event()
 
     #: Cap the retained log so a long-running task (e.g. a scraper that streams output for
     #: hours) can't grow this list without bound. We keep the most recent lines.
