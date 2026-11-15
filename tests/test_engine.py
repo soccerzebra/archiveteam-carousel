@@ -126,6 +126,21 @@ def test_runner_survives_item_failure():
     assert runner.completed == 2 and runner.failed == 1
 
 
+def test_derive_phase_classifies_from_latest_line():
+    from runner import derive_phase
+
+    # Only the newest non-empty line decides; first phrase match wins.
+    assert derive_phase(["Contacting tracker.", "Trying again in 107 seconds."]) == "waiting"
+    assert derive_phase(["No free items available currently."]) == "waiting"
+    assert derive_phase(["Sleeping for a bit..."]) == "sleeping"
+    assert derive_phase(["WgetDownload returned 8", "Retrying WgetDownload after 2s."]) == "retrying"
+    assert derive_phase(["Tracker rate limiting is active; slowing down."]) == "rate-limited"
+    # A newer working line overrides an older rest line.
+    assert derive_phase(["Trying again in 60 seconds.", "Downloading https://x/"]) == ""
+    assert derive_phase(["", "   "]) == ""  # no usable line => working
+    assert derive_phase([]) == ""
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

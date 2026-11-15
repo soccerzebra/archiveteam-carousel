@@ -26,6 +26,39 @@ class GracefulStop(Exception):
     """Raised by a task (or injected) to tell a worker loop to stop after the current item."""
 
 
+# Generic phrases meaning "this thread is resting, not actively transferring". These are
+# common to ArchiveTeam's trackers and retry loops across the whole project ecosystem (the
+# trackers emit the same "no items / trying again" text everywhere, and our own retry loop
+# logs "retrying"), so this is a small SHARED heuristic — not per-project log parsing. Only
+# the most-recent non-empty log line is consulted; first phrase match wins. No match => the
+# thread is treated as actively working and the UI shows the live log instead of a status.
+REST_PHRASES: tuple[tuple[str, str], ...] = (
+    ("trying again in", "waiting"),
+    ("no free items", "waiting"),
+    ("no items", "waiting"),
+    ("waiting for", "waiting"),
+    ("sleeping", "sleeping"),
+    ("retrying", "retrying"),
+    ("rate limit", "rate-limited"),
+    ("slowing down", "rate-limited"),
+    ("backing off", "waiting"),
+)
+
+
+def derive_phase(log: list[str]) -> str:
+    """Classify a thread as resting from its latest log line, or "" when it's working."""
+    for line in reversed(log):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        low = stripped.lower()
+        for phrase, label in REST_PHRASES:
+            if phrase in low:
+                return label
+        return ""  # newest line isn't a rest phrase => actively working
+    return ""
+
+
 class Runner:
     def __init__(
         self,
@@ -51,16 +84,75 @@ class Runner:
         self.failed = 0
         # Live per-slot state for the dashboard's thread view, keyed by worker index.
         self.threads: dict[int, dict] = {}
+        # Dynamic concurrency pool: one task per active slot. The count can change at
+        # runtime via set_concurrency() without restarting the process, so in-flight items
+        # keep running. _retiring holds slots that should exit after their current item.
+        self._slots: dict[int, asyncio.Task] = {}
+        self._retiring: set[int] = set()
+        self._pool_changed: asyncio.Event | None = None
 
     def stop(self) -> None:
         """Request graceful stop: workers finish their current item, then exit."""
         self._stopped = True
 
+    def set_concurrency(self, concurrent_items: int) -> None:
+        """Change the live slot count without restarting.
+
+        Growing spawns new slot coroutines (reviving pending retirements first); shrinking
+        flags surplus slots to exit after their current item finishes. In-flight items are
+        never interrupted.
+        """
+        target = max(1, int(concurrent_items))
+        self.concurrent_items = target
+        active = [i for i in self._slots if i not in self._retiring]
+        if target > len(active):
+            need = target - len(active)
+            # Cancel pending retirements before spawning brand-new slots.
+            for idx in list(self._retiring):
+                if need == 0:
+                    break
+                self._retiring.discard(idx)
+                need -= 1
+            if need:
+                self._spawn_slots(need)
+        elif target < len(active):
+            # Retire the highest-indexed active slots; they stop after the current item.
+            for idx in sorted(active, reverse=True)[: len(active) - target]:
+                self._retiring.add(idx)
+
+    def _spawn_slots(self, count: int) -> None:
+        for _ in range(count):
+            idx = 0
+            while idx in self._slots:
+                idx += 1
+            self._slots[idx] = asyncio.create_task(self._worker(idx))
+        if self._pool_changed is not None:
+            self._pool_changed.set()  # wake run() so it awaits the new slots too
+
     async def run(self) -> None:
-        workers = [asyncio.create_task(self._worker(i)) for i in range(self.concurrent_items)]
+        self._pool_changed = asyncio.Event()
+        self._spawn_slots(self.concurrent_items)
         ticker = asyncio.create_task(self._tick())
         try:
-            await asyncio.gather(*workers)
+            while self._slots:
+                self._pool_changed.clear()
+                change = asyncio.create_task(self._pool_changed.wait())
+                try:
+                    await asyncio.wait(
+                        [*self._slots.values(), change],
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                finally:
+                    change.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await change
+                # Reap finished slots (retired or drained); surface an unexpected crash.
+                for idx in [i for i, t in self._slots.items() if t.done()]:
+                    task = self._slots.pop(idx)
+                    self._retiring.discard(idx)
+                    exc = None if task.cancelled() else task.exception()
+                    if exc is not None:
+                        raise exc
         finally:
             ticker.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -74,7 +166,7 @@ class Runner:
             self._emit_threads()
 
     async def _worker(self, index: int) -> None:
-        while not self._stopped:
+        while not self._stopped and index not in self._retiring:
             item = self.item_factory()
             self._thread_begin(index, item)
             try:
@@ -108,7 +200,7 @@ class Runner:
             self._notify(item)
 
     # --- live per-thread tracking -----------------------------------------------------
-    LOG_TAIL = 6  # log lines reported per thread
+    LOG_TAIL = 3  # log lines reported per thread
     LOG_WIDTH = 240  # max chars per reported line
 
     def _thread_begin(self, index: int, item: Any) -> None:
@@ -131,16 +223,18 @@ class Runner:
         for i in sorted(self.threads):
             t = self.threads[i]
             item = t["item"]
+            log = [ln[: self.LOG_WIDTH] for ln in item.log[-self.LOG_TAIL :]]
             out.append(
                 {
                     "slot": i,
                     "item_id": item.item_id,
                     "item_name": item.description(),
                     "task": t["task"],
+                    "phase": derive_phase(log),
                     "started": t["started"],
                     "bytes_up": int(item.get("carousel_bytes", 0)),
                     "bytes_down": 0,
-                    "log": [ln[: self.LOG_WIDTH] for ln in item.log[-self.LOG_TAIL :]],
+                    "log": log,
                 }
             )
         return out

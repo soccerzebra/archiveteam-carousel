@@ -46,6 +46,7 @@ class ItemStatus(BaseModel):
     item_id: str = ""
     item_name: str = ""
     task: str = ""  # current pipeline step
+    phase: str = ""  # derived rest state ("waiting"/"sleeping"/…); "" = actively working
     started: float = 0.0  # epoch seconds the item began (UI derives elapsed)
     bytes_up: int = 0  # archived bytes uploaded so far for this item
     bytes_down: int = 0  # bytes downloaded (when the pipeline reports it)
