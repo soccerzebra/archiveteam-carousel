@@ -1,0 +1,17 @@
+# Reference material — upstream ArchiveTeam repos, studied but not shipped
+reference/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Runtime data
+/data/
+/projects/
+config.json
