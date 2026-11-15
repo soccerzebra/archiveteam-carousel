@@ -44,7 +44,7 @@ project at once:
 ```bash
 python3.11 -m venv .venv && . .venv/bin/activate   # 3.11 — projects use distutils (gone in 3.12)
 pip install -e '.[dev]'
-pytest                 # 72 tests, all offline (no network, no production tracker)
+pytest                 # 75 tests, all offline (no network, no production tracker)
 ```
 
 ## Tests & validation
@@ -66,6 +66,7 @@ binaries** (`curl`, `rsync`) against a local server.
 | `test_full_chain.py` | **Hermetic full chain**: claim → `curl` download → stats → `curl`/`rsync` upload → done, asserting uploaded bytes + `/done` stats exactly. |
 | `test_supervisor.py` | Budget split, bandwidth split, status parsing, reconcile (start/stop/restart), crash recovery, update detection. |
 | `test_stats.py` | SQLite stats history: record, bucketed time-series read, window filtering, persistence across reopen. |
+| `test_hq.py` | Warrior HQ wire format: register/update bodies, User-Agent, catalog parsing (git vs docker). |
 | `test_app.py` | HTTP API (status, projects, enable/disable, settings, restart, concurrency) via `TestClient`. |
 | `test_surface.py` | Our `seesaw` exports every symbol real projects import. |
 
