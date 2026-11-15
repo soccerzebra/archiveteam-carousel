@@ -69,23 +69,34 @@ python3.9 -m venv /tmp/tv && /tmp/tv/bin/pip install 'tornado>=4,<5'
 **Not yet covered by tests** (→ the live crawl): `wget-at` actually producing a valid WARC,
 and running the real `urls`/`reddit`/… `pipeline.py` with their `.lua` scripts and deps.
 
-## Running a real project end to end (integration)
+## Docker images
 
-The unit suite avoids external binaries; actually crawling needs the worker image, which
-provides `wget-at` and project deps:
+Everything runs on **one Python, 3.11** — the newest that still ships stdlib `distutils`,
+which the existing project pipelines we run unchanged import. The images are based on
+ArchiveTeam's `grab-base` (for `wget-at` and its shared libs) with 3.11 installed as the
+default interpreter. `grab-base` is `linux/amd64`, so build for amd64 (it runs under
+emulation on Apple Silicon):
 
 ```bash
-docker build -f docker/Dockerfile.base -t carousel-base:latest .
+docker build --platform linux/amd64 -f docker/Dockerfile.base -t carousel-base .  # worker runtime
+docker build --platform linux/amd64 -f docker/Dockerfile      -t carousel      .  # control plane
+```
 
-docker run --rm -it \
-  -v "$PWD/worker:/opt/carousel/worker" \
-  -v "$PWD/reference/urls-grab:/project" \
-  carousel-base:latest \
-  python -m worker.run_pipeline --project urls --pipeline /project/pipeline.py \
+## Running a real project end to end (integration)
+
+The unit suite avoids external binaries; actually crawling needs the worker image. This
+claims a **real** item from the live tracker and uploads results — use your own downloader
+handle (`^[-_a-zA-Z0-9]{3,30}$`). The project's `warrior-install.sh` runs at startup to
+install its extra deps (e.g. `lupa`, ghostscript).
+
+```bash
+docker run --rm --platform linux/amd64 \
+  -v "$PWD/reference/urls-grab:/project:ro" \
+  carousel-base \
+  python3 -m worker.run_pipeline --project urls --pipeline /project/pipeline.py \
       --downloader YOUR_HANDLE --concurrent-items 1 --data-dir /home/warrior/data
 ```
 
-This claims a real item from the live tracker and uploads results — use your own
-downloader handle. Known rough edges to smooth next: the project install hook
-(`warrior-install.sh`) needs root/sudo, and `wget-at` is currently copied from `grab-base`
-rather than built from source.
+Outbound rsync (tcp/873) must be allowed for uploads to reach the tracker-assigned target.
+Later refinements: the distinct per-TLS-variant `wget-at` binaries (we symlink one), and
+building `wget-at` from source to drop the `grab-base` dependency.

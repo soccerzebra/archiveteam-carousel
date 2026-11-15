@@ -1,38 +1,42 @@
-# Worker runtime base image.
+# Worker/runtime base image: ArchiveTeam's grab-base (for wget-at + its shared libs and
+# the crawl toolchain), with ONE modern Python — 3.11 — made the default interpreter for
+# everything (control plane and workers alike). 3.11 is the newest Python that still ships
+# stdlib distutils, which the existing project pipelines we run unchanged import.
 #
-# Provides everything a project's pipeline.py needs to RUN — but none of the control
-# plane. The control-plane image builds FROM this (see docker/Dockerfile).
-#
-# Pinned to Python 3.11: current AT projects still `from distutils.version import
-# StrictVersion`, and distutils was removed from the stdlib in 3.12.
-FROM python:3.11-slim
+# grab-base is linux/amd64, so build for amd64:
+#   docker build --platform linux/amd64 -f docker/Dockerfile.base -t carousel-base .
+FROM atdr.meo.ws/archiveteam/grab-base
 
-# --- wget-at: the archiving engine -------------------------------------------------
-# wget-at (patched GNU Wget + Lua + WARC/zstd) is the actual crawler. It is a separately
-# maintained C program, NOT seesaw — projects invoke it via their .lua scripts. We copy
-# the prebuilt binary from grab-base for now.
-# TODO: optionally build from source (ArchiveTeam/wget-lua) to drop the external image dep.
-COPY --from=atdr.meo.ws/archiveteam/grab-base:gnutls /usr/local/bin/wget-lua /usr/local/bin/wget-at
+# grab-base's entrypoint is run-pipeline3; clear it so we invoke our own worker.
+ENTRYPOINT []
 
-# --- OS deps the pipelines shell out to --------------------------------------------
+# Install Python 3.11 (+ distutils, which Debian unbundles) and make it the default
+# python3/python, shadowing grab-base's source-built 3.9. wget-at is a binary and does not
+# depend on the Python version.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      rsync curl ca-certificates git zstd \
- && rm -rf /var/lib/apt/lists/*
+      python3.11 python3.11-venv python3.11-dev python3-distutils python3-pip \
+ && rm -rf /var/lib/apt/lists/* \
+ && ln -sf /usr/bin/python3.11 /usr/local/bin/python3 \
+ && ln -sf /usr/bin/python3.11 /usr/local/bin/python \
+ # Debian marks its Python externally-managed (PEP 668), which blocks pip — including
+ # a project's warrior-install.sh. Remove the marker so pip works in this container.
+ && rm -f /usr/lib/python3.11/EXTERNALLY-MANAGED
 
-# --- Python deps that project pipeline.py files import directly --------------------
-# (ours to provide, not ours to implement: projects `import tornado/requests/zstandard`.)
-RUN pip install --no-cache-dir \
-      "httpx>=0.27" \
-      "tornado>=6.4" \
-      "requests>=2.32" \
-      "zstandard>=0.22"
+# Deps project pipelines import directly (tornado/requests/zstandard) + our tracker client.
+RUN python3 -m pip install --no-cache-dir \
+      "httpx>=0.27" "tornado>=6.4" "requests>=2.32" "zstandard>=0.22"
 
-# --- our clean-room runtime, importable as `seesaw` --------------------------------
-RUN useradd -m --uid 1000 warrior
-WORKDIR /home/warrior
-COPY --chown=warrior:warrior worker/ /opt/carousel/worker/
-# Expose worker/seesaw as top-level `import seesaw` for project pipelines.
+# Make wget-at discoverable at the paths project pipelines probe, and create data dirs.
+# Projects ask for a specific TLS variant (nss/openssl/gnutls); point them all at the
+# bundled wget-lua (wiring the distinct per-variant binaries is a later refinement).
+RUN mkdir -p /home/warrior/data /home/warrior/projects \
+ && for v in wget-at wget-at-gnutls wget-at-openssl wget-at-nss; do \
+      ln -sf /usr/local/bin/wget-lua /home/warrior/data/$v; \
+    done
+
+# Our worker code: importable as `worker`, and `seesaw` via PYTHONPATH.
+COPY worker/ /opt/carousel/worker/
 ENV PYTHONPATH=/opt/carousel:/opt/carousel/worker
-USER 1000
-RUN mkdir -p data projects
+
+WORKDIR /home/warrior
