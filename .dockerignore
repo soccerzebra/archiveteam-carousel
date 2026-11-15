@@ -1,4 +1,5 @@
 reference/
+data/
 .venv/
 .git/
 **/__pycache__/

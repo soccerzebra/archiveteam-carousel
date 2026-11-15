@@ -96,6 +96,31 @@ def test_runnable_pipeline_claims_and_reports_done():
     assert json.loads(http.calls[0]["content"]) == {"downloader": "josh", "version": "1"}
 
 
+def test_ensure_wget_at_symlinks_into_data_dir():
+    """A wget-lua on PATH gets linked under every variant name in the data dir (idempotently)."""
+    import os
+    import shutil
+    import tempfile
+
+    bindir = tempfile.mkdtemp()
+    datadir = tempfile.mkdtemp()
+    old_path = os.environ.get("PATH", "")
+    try:
+        fake = pathlib.Path(bindir) / "wget-lua"
+        fake.write_text("#!/bin/sh\n")
+        fake.chmod(0o755)
+        os.environ["PATH"] = bindir + os.pathsep + old_path
+        run_pipeline.ensure_wget_at(datadir)
+        run_pipeline.ensure_wget_at(datadir)  # second call must be a no-op, not an error
+        for name in run_pipeline.WGET_AT_VARIANTS:
+            link = pathlib.Path(datadir) / name
+            assert link.is_symlink() and os.readlink(link) == str(fake)
+    finally:
+        os.environ["PATH"] = old_path
+        shutil.rmtree(bindir, ignore_errors=True)
+        shutil.rmtree(datadir, ignore_errors=True)
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

@@ -1,11 +1,21 @@
-# Worker/runtime base image: ArchiveTeam's grab-base (for wget-at + its shared libs and
-# the crawl toolchain), with ONE modern Python — 3.11 — made the default interpreter for
-# everything (control plane and workers alike). 3.11 is the newest Python that still ships
-# stdlib distutils, which the existing project pipelines we run unchanged import.
+# Worker/runtime base image: ArchiveTeam's crawl toolchain (wget-at + its shared libs), with
+# ONE modern Python — 3.11 — made the default interpreter for everything (control plane and
+# workers alike). 3.11 is the newest Python that still ships stdlib distutils, which the
+# existing project pipelines we run unchanged import.
 #
-# grab-base is linux/amd64, so build for amd64:
+# We base on a current PROJECT image (urls-grab) rather than `grab-base` directly. A project
+# image IS grab-base plus that project's files (which we ignore — we clone projects ourselves),
+# but published `grab-base:latest` lags behind it: the project images carry a newer, self-
+# consistent toolchain — a wget-at with full TLS `--impersonate` AND the patched NSS libraries
+# it needs. Several projects (uploaderjp, instagram, youtube, …) require that; the stock
+# grab-base binary only does HTTP-header impersonation, and copying the binary alone fails at
+# the TLS handshake. Verified 2026-11 that this wget-at is a flag-superset of every current
+# project's own build (the only options it drops, --ftps-resume-ssl/--random-file, are unused
+# by any pipeline). If a future project needs a newer toolchain, bump this tag.
+#
+# linux/amd64, so build for amd64:
 #   docker build --platform linux/amd64 -f docker/Dockerfile.base -t carousel-base .
-FROM atdr.meo.ws/archiveteam/grab-base
+FROM atdr.meo.ws/archiveteam/urls-grab
 
 # grab-base's entrypoint is run-pipeline3; clear it so we invoke our own worker.
 ENTRYPOINT []

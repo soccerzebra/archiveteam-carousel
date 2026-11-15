@@ -19,18 +19,22 @@ import asyncio
 import contextlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
+# wget-at ships under several TLS-variant names; project pipelines probe for one of these.
+WGET_AT_VARIANTS = ("wget-at", "wget-at-gnutls", "wget-at-openssl", "wget-at-nss")
+
 # When run as a module (python -m worker.run_pipeline) the package root is importable; when
 # run as a script, make sure `seesaw` (next to this file) is on the path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from runner import Runner
-from seesaw.context import RunContext
-from seesaw.item import Item
+from runner import Runner  # noqa: E402  (import after the sys.path.insert above)
+from seesaw.context import RunContext  # noqa: E402
+from seesaw.item import Item  # noqa: E402
 
 
 def emit(obj: dict) -> None:
@@ -47,13 +51,43 @@ def apply_bandwidth_limit(project: str, data_dir: str, limit_rate: int) -> None:
     sets ``limit_rate`` or ``WGETRC``, so this is purely additive. ``limit_rate <= 0`` leaves
     wget unthrottled.
     """
-    if limit_rate <= 0:
-        return
     rc_dir = Path(data_dir)
-    rc_dir.mkdir(parents=True, exist_ok=True)
     rc_path = rc_dir / f"carousel-wgetrc-{project}"
+    if limit_rate <= 0:
+        # Lifting the cap (e.g. a live change back to unlimited): drop our wgetrc so new
+        # wgets run unthrottled again.
+        if os.environ.get("WGETRC") == str(rc_path):
+            os.environ.pop("WGETRC", None)
+        with contextlib.suppress(OSError):
+            rc_path.unlink()
+        return
+    rc_dir.mkdir(parents=True, exist_ok=True)
     rc_path.write_text(f"limit_rate = {int(limit_rate)}\n")
     os.environ["WGETRC"] = str(rc_path)
+
+
+def ensure_wget_at(data_dir: str) -> None:
+    """Make the real wget-at binary discoverable at the path project pipelines probe.
+
+    The base image symlinks the variant names into ``/home/warrior/data``, but a host
+    directory mounted over ``/home/warrior`` shadows those baked symlinks, so they vanish at
+    runtime. Project pipelines resolve ``WGET_AT`` at import time by probing
+    ``<data_dir>/wget-at-nss`` (etc.), so recreate the symlinks inside the mounted data dir
+    here, before any pipeline loads. No-op when no wget-at binary is on PATH.
+    """
+    target = shutil.which("wget-lua") or shutil.which("wget-at")
+    if not target:
+        return
+    d = Path(data_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    for name in WGET_AT_VARIANTS:
+        link = d / name
+        with contextlib.suppress(OSError):
+            if link.is_symlink() and os.readlink(link) == target:
+                continue
+            if link.is_symlink() or link.exists():
+                link.unlink()
+            link.symlink_to(target)
 
 
 def load_pipeline(pipeline_path: str, downloader: str, extra_context: dict | None = None):
@@ -91,13 +125,50 @@ def load_pipeline(pipeline_path: str, downloader: str, extra_context: dict | Non
     return namespace["project"], namespace["pipeline"]
 
 
+async def read_commands(runner: Runner, args: argparse.Namespace) -> None:
+    """Apply live control commands the supervisor writes to our stdin, one JSON object per
+    line. Lets concurrency and bandwidth change WITHOUT restarting the process, so in-flight
+    items keep running. If stdin isn't a readable pipe, there's simply no live control.
+    """
+    loop = asyncio.get_running_loop()
+    reader = asyncio.StreamReader()
+    try:
+        await loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(reader), sys.stdin)
+    except (ValueError, OSError):
+        return  # stdin not connectable (interactive / closed) — no live control channel
+    async for raw in reader:
+        line = raw.decode("utf-8", "replace").strip()
+        if not line:
+            continue
+        try:
+            cmd = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        action = cmd.get("cmd")
+        if action == "reconfigure":
+            if "concurrent_items" in cmd:
+                runner.set_concurrency(int(cmd["concurrent_items"]))
+            if "limit_rate" in cmd:
+                apply_bandwidth_limit(args.project, args.data_dir, int(cmd["limit_rate"]))
+            emit(
+                {
+                    "event": "running",
+                    "project": args.project,
+                    "concurrent_items": runner.concurrent_items,
+                }
+            )
+        elif action == "stop":
+            runner.stop()
+
+
 def run_install_hook(project_dir: str) -> None:
     """Run a project's warrior-install.sh if present (installs its extra dependencies)."""
     hook = Path(project_dir) / "warrior-install.sh"
     if not hook.exists():
         return
     emit({"event": "install_hook", "status": "running"})
-    result = subprocess.run(["bash", str(hook)], cwd=project_dir)
+    # DEVNULL stdin: our control channel owns the worker's stdin, so the hook must not read it.
+    result = subprocess.run(["bash", str(hook)], cwd=project_dir, stdin=subprocess.DEVNULL)
     if result.returncode != 0:
         raise RuntimeError(f"warrior-install.sh failed with code {result.returncode}")
     emit({"event": "install_hook", "status": "done"})
@@ -106,6 +177,7 @@ def run_install_hook(project_dir: str) -> None:
 async def run(args: argparse.Namespace) -> int:
     project_dir = Path(args.pipeline).resolve().parent
     run_install_hook(str(project_dir))
+    ensure_wget_at(args.data_dir)
     apply_bandwidth_limit(args.project, args.data_dir, args.limit_rate)
 
     project, pipeline = load_pipeline(args.pipeline, args.downloader)
@@ -152,10 +224,18 @@ async def run(args: argparse.Namespace) -> int:
         with contextlib.suppress(NotImplementedError, RuntimeError):
             loop.add_signal_handler(__import__("signal").SIGINT, runner.stop)
 
+        run_task = asyncio.create_task(runner.run())
+        # Live control channel (concurrency / bandwidth changes without a restart).
+        cmd_task = asyncio.create_task(read_commands(runner, args))
         emit(
             {"event": "running", "project": args.project, "concurrent_items": args.concurrent_items}
         )
-        await runner.run()
+        try:
+            await run_task
+        finally:
+            cmd_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cmd_task
 
     emit(
         {
