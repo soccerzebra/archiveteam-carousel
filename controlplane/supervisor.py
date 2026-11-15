@@ -16,6 +16,7 @@ later without touching reconcile logic; the default is a subprocess (the user's 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import signal
@@ -100,6 +101,7 @@ class WorkerHandle(Protocol):
     version_dir: Path
 
     async def stop(self, graceful: bool = True) -> None: ...
+    async def reconfigure(self, concurrent_items: int, limit_rate: int = 0) -> None: ...
     def snapshot(self) -> WorkerStatus: ...
 
 
@@ -166,6 +168,25 @@ class SubprocessWorker:
             self._proc.kill()
         self._reader.cancel()
 
+    async def reconfigure(self, concurrent_items: int, limit_rate: int = 0) -> None:
+        """Change the running worker's slot count / bandwidth live, without a restart.
+
+        Writes a control command to the worker's stdin; the worker grows/shrinks its pool
+        and re-points wget's rate cap, leaving in-flight items untouched.
+        """
+        cmd = {
+            "cmd": "reconfigure",
+            "concurrent_items": int(concurrent_items),
+            "limit_rate": int(limit_rate),
+        }
+        if self._proc.stdin is not None:
+            self._proc.stdin.write((json.dumps(cmd) + "\n").encode("utf-8"))
+            with contextlib.suppress(Exception):
+                await self._proc.stdin.drain()
+        self.concurrent_items = int(concurrent_items)
+        self.limit_rate = int(limit_rate)
+        self.status.concurrent_items = int(concurrent_items)
+
     def snapshot(self) -> WorkerStatus:
         return self.status
 
@@ -199,6 +220,7 @@ class SubprocessBackend:
             str(int(limit_rate)),
             cwd=self.worker_root,
             env=env,
+            stdin=asyncio.subprocess.PIPE,  # live control channel (reconfigure commands)
             stdout=asyncio.subprocess.PIPE,
             stderr=None,  # human/wget logs flow to the control plane's stderr
         )
@@ -270,14 +292,13 @@ class Supervisor:
                 current = self.workers.get(name)
                 if current is None:
                     await self._start(name, want, rate)
-                elif (
-                    self._is_dead(current)
-                    or current.concurrent_items != want
-                    or getattr(current, "limit_rate", 0) != rate
-                ):
-                    # restart a crashed/exited worker, or re-slice budget / bandwidth
-                    await self._stop(name)
-                    await self._start(name, want, rate)
+                elif self._is_dead(current):
+                    # A crashed/exited worker: respawn it on the SAME pinned code.
+                    await self._restart(name, want, rate)
+                elif current.concurrent_items != want or getattr(current, "limit_rate", 0) != rate:
+                    # Budget / bandwidth changed: reconfigure the live worker in place so its
+                    # in-flight items keep running — no restart, no re-install.
+                    await current.reconfigure(want, rate)
 
     @staticmethod
     def _is_dead(worker: WorkerHandle) -> bool:
@@ -304,8 +325,14 @@ class Supervisor:
             await self.reconcile()
 
     async def _start(self, name: str, concurrent_items: int, limit_rate: int = 0) -> None:
+        """Install/pin the project (acquires its version dir) and spawn a worker on it."""
         info = self.catalog[name]
         version_dir = await self.installer.prepare(info)
+        await self._spawn(name, version_dir, concurrent_items, limit_rate)
+
+    async def _spawn(
+        self, name: str, version_dir: Path, concurrent_items: int, limit_rate: int = 0
+    ) -> None:
         self.workers[name] = await self.backend.spawn(
             name,
             version_dir,
@@ -315,7 +342,19 @@ class Supervisor:
             limit_rate=limit_rate,
         )
 
+    async def _restart(self, name: str, concurrent_items: int, limit_rate: int = 0) -> None:
+        """Replace a dead worker, REUSING its pinned version dir (no release, no re-install).
+
+        The version dir is still referenced across the restart, so it must not be released;
+        re-installing would needlessly re-fetch over the network (and could fail, leaving the
+        project permanently stopped).
+        """
+        old = self.workers.pop(name)
+        await old.stop()
+        await self._spawn(name, old.version_dir, concurrent_items, limit_rate)
+
     async def _stop(self, name: str) -> None:
+        """Stop a worker and release its version dir (used for disable / code-update)."""
         worker = self.workers.pop(name)
         await worker.stop()
         self.installer.release(worker.version_dir)

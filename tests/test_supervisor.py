@@ -25,6 +25,11 @@ class FakeWorker:
     async def stop(self, graceful=True):
         self.stopped = True
 
+    async def reconfigure(self, concurrent_items, limit_rate=0):
+        self.concurrent_items = concurrent_items
+        self.limit_rate = limit_rate
+        self.status.concurrent_items = concurrent_items
+
     def snapshot(self):
         return self.status
 
@@ -148,25 +153,31 @@ async def test_reconcile_stops_disabled_project(tmp_path):
     config.project("urls").enabled = True
     config.project("reddit").enabled = True
     await sup.reconcile()
-    worker = sup.workers["reddit"]
+    reddit = sup.workers["reddit"]
+    urls = sup.workers["urls"]
     config.project("reddit").enabled = False
     await sup.reconcile()
     assert set(sup.workers) == {"urls"}
-    assert worker.stopped is True
+    assert reddit.stopped is True
     assert pathlib.Path("/versions/reddit") in sup.installer.released
-    # urls is alone now => gets the whole budget of 6, so it was restarted at the new slice
-    assert sup.workers["urls"].concurrent_items == 6
+    # urls is alone now => gets the whole budget of 6, applied live (same worker, no respawn).
+    assert sup.workers["urls"] is urls
+    assert urls.concurrent_items == 6
+    assert len(sup.backend.spawns) == 2  # urls + reddit started once each; urls not respawned
 
 
-async def test_reconcile_restarts_on_budget_change(tmp_path):
+async def test_reconcile_reconfigures_on_budget_change(tmp_path):
     config, sup = make_supervisor(tmp_path, max_items=6)
     config.project("urls").enabled = True
     await sup.reconcile()
-    assert sup.workers["urls"].concurrent_items == 6
+    worker = sup.workers["urls"]
+    assert worker.concurrent_items == 6
     config.global_config.max_concurrent_items = 2
     await sup.reconcile()
-    assert sup.workers["urls"].concurrent_items == 2
-    assert len(sup.backend.spawns) == 2  # started, then restarted at new budget
+    # Same process, reconfigured live: in-flight items keep running.
+    assert sup.workers["urls"] is worker
+    assert worker.concurrent_items == 2
+    assert len(sup.backend.spawns) == 1  # never respawned
 
 
 async def test_reconcile_without_downloader_runs_nothing(tmp_path):
@@ -186,6 +197,9 @@ async def test_reconcile_restarts_crashed_worker(tmp_path):
     assert sup.workers["urls"] is not crashed  # replaced with a fresh worker
     assert sup.workers["urls"].snapshot().state is WorkerState.RUNNING
     assert len(sup.backend.spawns) == 2
+    # Non-destructive: reused the pinned dir (no re-install, no release).
+    assert sup.installer.prepared == ["urls"]
+    assert sup.installer.released == []
 
 
 async def test_check_updates_restarts_stale_worker(tmp_path):
@@ -202,6 +216,9 @@ async def test_check_updates_restarts_stale_worker(tmp_path):
     await sup.check_updates()
     assert sup.workers["urls"] is not original  # restarted on update
     assert len(sup.backend.spawns) == 2
+    # Code update IS destructive: old version released, new code re-prepared.
+    assert sup.installer.prepared == ["urls", "urls"]
+    assert pathlib.Path("/versions/urls") in sup.installer.released
 
 
 async def test_download_rate_splits_global_limit(tmp_path):
@@ -214,15 +231,17 @@ async def test_download_rate_splits_global_limit(tmp_path):
     assert sup.download_rate() == 1_000_000
 
 
-async def test_bandwidth_change_restarts_workers(tmp_path):
+async def test_bandwidth_change_reconfigures_workers(tmp_path):
     config, sup = make_supervisor(tmp_path, max_items=4)
     config.project("urls").enabled = True
     await sup.reconcile()
-    assert sup.workers["urls"].limit_rate == 0
+    worker = sup.workers["urls"]
+    assert worker.limit_rate == 0
     config.global_config.bandwidth_limit = 4_000_000  # 4 MB/s over 4 slots => 1 MB/s each
     await sup.reconcile()
-    assert sup.workers["urls"].limit_rate == 1_000_000
-    assert len(sup.backend.spawns) == 2  # restarted to apply the new rate
+    assert sup.workers["urls"] is worker  # applied live, not restarted
+    assert worker.limit_rate == 1_000_000
+    assert len(sup.backend.spawns) == 1
 
 
 async def test_snapshot_reports_all_workers(tmp_path):
