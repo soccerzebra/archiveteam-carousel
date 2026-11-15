@@ -126,6 +126,20 @@ def test_runner_survives_item_failure():
     assert runner.completed == 2 and runner.failed == 1
 
 
+def test_runner_seeds_data_dir_on_each_item():
+    seen = {}
+
+    class Capture(Task):
+        async def run(self, item, ctx):
+            seen["data_dir"] = item["data_dir"]  # projects' PrepareDirectories reads this
+            raise GracefulStop
+
+    ctx = RunContext(data_dir="/home/warrior/data")
+    runner = Runner(Pipeline(Capture("cap")), concurrent_items=1, ctx=ctx)
+    asyncio.run(runner.run())
+    assert seen["data_dir"] == "/home/warrior/data"
+
+
 def test_derive_phase_classifies_from_latest_line():
     from runner import derive_phase
 

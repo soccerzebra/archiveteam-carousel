@@ -168,6 +168,9 @@ class Runner:
     async def _worker(self, index: int) -> None:
         while not self._stopped and index not in self._retiring:
             item = self.item_factory()
+            # Seed the shared data directory every project's pipeline expects on the item
+            # (PrepareDirectories builds <data_dir>/<hash> and writes WARCs under data_dir).
+            item["data_dir"] = self.ctx.data_dir
             self._thread_begin(index, item)
             try:
                 await self.pipeline.run_item(
