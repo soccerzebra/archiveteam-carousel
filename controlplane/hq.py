@@ -84,4 +84,7 @@ def _parse_project(p: dict) -> ProjectInfo:
         repository=p.get("repository"),
         docker=p.get("docker"),
         deadline=p.get("deadline"),
+        description=p.get("description", "") or "",
+        logo=p.get("logo") or None,
+        leaderboard=p.get("leaderboard") or None,
     )

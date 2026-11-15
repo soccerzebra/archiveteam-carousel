@@ -108,7 +108,10 @@
   .proj .title { font-weight:550; }
   .proj .meta { color:var(--muted); font-size:12px; }
   .proj .src { font-size:11px; color:var(--muted); border:1px solid var(--border);
-               border-radius:6px; padding:1px 7px; margin-left:8px; }
+               border-radius:6px; padding:1px 7px; margin-left:8px; vertical-align:middle; }
+  .proj .plogo { width:34px; height:34px; flex:0 0 auto; object-fit:contain; border-radius:7px;
+                 background:#fff; border:1px solid var(--border); padding:3px; }
+  .proj .pdesc { white-space:normal; margin-top:1px; }
 
   /* switch */
   .switch { position:relative; width:40px; height:23px; flex:0 0 auto; }
@@ -143,6 +146,17 @@
   #chart .bar { fill:var(--accent); }
   #chart .axis { stroke:var(--border); }
   #chart text { fill:var(--muted); font-size:10px; }
+
+  .toast-wrap { position:fixed; right:18px; bottom:18px; display:flex; flex-direction:column;
+                gap:8px; z-index:50; }
+  .toast { background:var(--panel); border:1px solid var(--border); border-left:3px solid var(--ok);
+           border-radius:9px; padding:11px 14px; box-shadow:0 8px 26px rgba(0,0,0,.2);
+           font-size:13px; min-width:190px; display:flex; align-items:center; gap:9px;
+           animation:toastIn .18s ease; }
+  .toast.err { border-left-color:var(--bad); }
+  .toast .ic { font-weight:700; } .toast.ok .ic { color:var(--ok); } .toast.err .ic { color:var(--bad); }
+  @keyframes toastIn { from{opacity:0; transform:translateY(10px);} to{opacity:1; transform:none;} }
+  button:disabled { opacity:.7; cursor:default; }
 
   .scrim { display:none; }
   @media (max-width:760px) {
@@ -179,6 +193,7 @@
     </div>
   </aside>
   <div class="scrim" id="scrim"></div>
+  <div class="toast-wrap" id="toasts"></div>
 
   <div class="content">
     <header class="topbar">
@@ -303,6 +318,16 @@ function fmtBytes(n) {
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
+function toast(msg, kind = 'ok') {
+  const wrap = document.getElementById('toasts');
+  const t = document.createElement('div');
+  t.className = 'toast ' + kind;
+  t.innerHTML = `<span class="ic">${kind === 'err' ? '✕' : '✓'}</span><span>${esc(msg)}</span>`;
+  wrap.appendChild(t);
+  setTimeout(() => { t.style.transition = 'opacity .3s'; t.style.opacity = '0';
+    setTimeout(() => t.remove(), 300); }, 2600);
+}
+
 /* ---- routing ---- */
 const titles = {dashboard:'Dashboard', projects:'Projects', stats:'Stats', settings:'Settings'};
 function route() {
@@ -385,11 +410,17 @@ function renderProjects(p) {
     const on = enabledSet.has(proj.name);
     const div = document.createElement('div');
     div.className = 'proj';
+    const logo = proj.logo
+      ? `<img class="plogo" src="${esc(proj.logo)}" alt="" loading="lazy"
+            onerror="this.style.visibility='hidden'">`
+      : `<span class="plogo"></span>`;
     div.innerHTML = `
       <label class="switch"><input type="checkbox" ${on?'checked':''} data-name="${esc(proj.name)}">
         <span class="slider"></span></label>
+      ${logo}
       <div style="flex:1;min-width:0">
         <div class="title">${esc(proj.title || proj.name)}<span class="src">${esc(proj.source)}</span></div>
+        ${proj.description ? `<div class="meta pdesc">${esc(proj.description)}</div>` : ''}
         <div class="meta">${esc(proj.name)}</div>
       </div>
       ${on ? `<label class="meta">threads
@@ -418,18 +449,35 @@ function updateBwNote() {
     mbps > 0 ? `≈ ${fmtBytes(mbps * 1e6 * 86400)}/day` : 'unlimited';
 }
 document.getElementById('bwLimit').addEventListener('input', updateBwNote);
-document.getElementById('saveSettings').onclick = async () => {
-  await api('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({
-      downloader: document.getElementById('downloader').value,
-      max_concurrent_items: Number(document.getElementById('maxItems').value) || 1,
-      max_rsync_threads: Number(document.getElementById('rsyncThreads').value) || 1,
-      bandwidth_limit: Math.round((Number(document.getElementById('bwLimit').value) || 0) * 1e6),
-    })});
-  load();
+document.getElementById('saveSettings').onclick = async (e) => {
+  const btn = e.currentTarget, orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const r = await fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        downloader: document.getElementById('downloader').value,
+        max_concurrent_items: Number(document.getElementById('maxItems').value) || 1,
+        max_rsync_threads: Number(document.getElementById('rsyncThreads').value) || 1,
+        bandwidth_limit: Math.round((Number(document.getElementById('bwLimit').value) || 0) * 1e6),
+      })});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    renderStatus(await r.json());
+    btn.textContent = 'Saved ✓';
+    toast('Settings saved');
+  } catch (err) {
+    btn.textContent = orig;
+    toast('Save failed — ' + err.message, 'err');
+  } finally {
+    setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 1400);
+  }
 };
-document.getElementById('stopAll').onclick = () => {
-  if (confirm('Stop all running workers?')) fetch('/api/stop', {method:'POST'}).then(load);
+document.getElementById('stopAll').onclick = async () => {
+  if (!confirm('Stop all running workers?')) return;
+  try {
+    const r = await fetch('/api/stop', {method:'POST'});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    toast('All workers stopped'); load();
+  } catch (err) { toast('Stop failed — ' + err.message, 'err'); }
 };
 
 /* ---- stats ---- */

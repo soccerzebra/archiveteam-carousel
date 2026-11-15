@@ -25,6 +25,9 @@ class ProjectInfo(BaseModel):
     repository: str | None = None  # git URL   (source == GIT)
     docker: str | None = None      # image ref (source == DOCKER)
     deadline: str | None = None
+    description: str = ""          # one-line blurb from HQ
+    logo: str | None = None        # project icon URL (HQ-hosted)
+    leaderboard: str | None = None # tracker leaderboard URL
 
 
 class WorkerState(str, enum.Enum):
