@@ -57,7 +57,22 @@ class Runner:
     async def run(self) -> None:
         workers = [asyncio.create_task(self._worker(i))
                    for i in range(self.concurrent_items)]
-        await asyncio.gather(*workers)
+        ticker = asyncio.create_task(self._tick())
+        try:
+            await asyncio.gather(*workers)
+        finally:
+            ticker.cancel()
+            try:
+                await ticker
+            except asyncio.CancelledError:
+                pass
+
+    async def _tick(self) -> None:
+        """Re-emit the thread snapshot periodically so the live log tail stays fresh even
+        while a single long-running task (e.g. a scraper) produces output."""
+        while not self._stopped:
+            await asyncio.sleep(3)
+            self._emit_threads()
 
     async def _worker(self, index: int) -> None:
         while not self._stopped:
@@ -94,27 +109,44 @@ class Runner:
             self._notify(item)
 
     # --- live per-thread tracking -----------------------------------------------------
+    LOG_TAIL = 6       # log lines reported per thread
+    LOG_WIDTH = 240    # max chars per reported line
+
     def _thread_begin(self, index: int, item: Any) -> None:
-        self.threads[index] = {"slot": index, "item_id": item.item_id,
-                               "item_name": item.description(), "task": "",
-                               "started": time.time(), "bytes_up": 0, "bytes_down": 0}
+        # Keep the live Item so the snapshot can read its current log/bytes each tick.
+        self.threads[index] = {"slot": index, "item": item, "task": "", "started": time.time()}
         self._emit_threads()
 
     def _thread_step(self, index: int, item: Any, task_name: str) -> None:
         t = self.threads.get(index)
         if t is not None:
             t["task"] = task_name
-            t["item_name"] = item.description()
-            t["bytes_up"] = int(item.get("carousel_bytes", 0))
         self._emit_threads()
 
     def _thread_end(self, index: int) -> None:
         self.threads.pop(index, None)
         self._emit_threads()
 
+    def _snapshot(self) -> list[dict]:
+        out = []
+        for i in sorted(self.threads):
+            t = self.threads[i]
+            item = t["item"]
+            out.append({
+                "slot": i,
+                "item_id": item.item_id,
+                "item_name": item.description(),
+                "task": t["task"],
+                "started": t["started"],
+                "bytes_up": int(item.get("carousel_bytes", 0)),
+                "bytes_down": 0,
+                "log": [ln[:self.LOG_WIDTH] for ln in item.log[-self.LOG_TAIL:]],
+            })
+        return out
+
     def _emit_threads(self) -> None:
         if self.on_threads:
-            self.on_threads(sorted(self.threads.values(), key=lambda t: t["slot"]))
+            self.on_threads(self._snapshot())
 
     def _notify(self, item: Any) -> None:
         if self.on_item_end:

@@ -48,6 +48,7 @@ class ItemStatus(BaseModel):
     started: float = 0.0      # epoch seconds the item began (UI derives elapsed)
     bytes_up: int = 0         # archived bytes uploaded so far for this item
     bytes_down: int = 0       # bytes downloaded (when the pipeline reports it)
+    log: list[str] = []       # last few log lines for this thread (live tail)
 
 
 class WorkerStatus(BaseModel):
