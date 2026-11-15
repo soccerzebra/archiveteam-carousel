@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Carousel</title>
+<style>
+  :root {
+    --bg:#f6f7f9; --panel:#fff; --border:#e2e5ea; --text:#1b1f24; --muted:#687079;
+    --accent:#2f6feb; --ok:#1a7f37; --warn:#9a6700; --bad:#cf222e; --chip:#eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#0d1117; --panel:#161b22; --border:#2b313a; --text:#e6edf3; --muted:#9198a1;
+      --accent:#4c8dff; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --chip:#20262e;
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  header { padding:16px; border-bottom:1px solid var(--border); background:var(--panel);
+           display:flex; flex-wrap:wrap; gap:12px 20px; align-items:center; }
+  h1 { font-size:18px; margin:0; font-weight:650; }
+  h1 .dot { color:var(--accent); }
+  .grow { flex:1; }
+  .pill { background:var(--chip); border-radius:999px; padding:3px 10px; font-size:12px;
+          color:var(--muted); }
+  main { max-width:1000px; margin:0 auto; padding:16px; display:grid; gap:16px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:12px;
+          padding:16px; }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em;
+             color:var(--muted); margin:0 0 12px; }
+  table { width:100%; border-collapse:collapse; }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); }
+  th { font-size:12px; color:var(--muted); font-weight:600; }
+  td.num { font-variant-numeric:tabular-nums; }
+  .state { font-size:12px; font-weight:600; padding:2px 8px; border-radius:6px;
+           background:var(--chip); }
+  .state.running { color:var(--ok); } .state.failed { color:var(--bad); }
+  .state.starting,.state.stopping { color:var(--warn); } .state.stopped { color:var(--muted); }
+  .proj { display:flex; align-items:center; gap:10px; padding:8px 0;
+          border-bottom:1px solid var(--border); }
+  .proj:last-child { border-bottom:0; }
+  .proj .title { font-weight:550; } .proj .meta { color:var(--muted); font-size:12px; }
+  input,button { font:inherit; color:var(--text); }
+  input[type=text],input[type=number] { background:var(--bg); border:1px solid var(--border);
+          border-radius:8px; padding:6px 10px; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px;
+           padding:6px 14px; cursor:pointer; font-weight:550; }
+  button.ghost { background:var(--chip); color:var(--text); }
+  button.danger { background:var(--bad); }
+  .switch { margin-left:auto; }
+  .empty { color:var(--muted); padding:8px 0; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  label { color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="dot">●</span> Carousel</h1>
+  <span class="pill" id="downloaderPill">downloader: —</span>
+  <span class="pill" id="budgetPill">budget: —</span>
+  <span class="grow"></span>
+  <span class="pill" id="conn">connecting…</span>
+</header>
+
+<main>
+  <div class="card">
+    <h2>Settings</h2>
+    <div class="row">
+      <label>Downloader <input type="text" id="downloader" placeholder="your handle"></label>
+      <label>Max concurrent items <input type="number" id="maxItems" min="1" style="width:80px"></label>
+      <button id="saveSettings">Save</button>
+      <button class="ghost" id="refresh">Refresh catalog</button>
+      <button class="danger" id="stopAll">Stop all</button>
+    </div>
+    <p class="empty" id="noDownloader" style="display:none">
+      Set a downloader handle to start archiving — nothing runs without one.</p>
+  </div>
+
+  <div class="card">
+    <h2>Running projects</h2>
+    <table>
+      <thead><tr><th>Project</th><th>State</th><th class="num">Concurrency</th>
+        <th class="num">Done</th><th class="num">Failed</th><th>Note</th><th></th></tr></thead>
+      <tbody id="workers"><tr><td colspan="7" class="empty">No workers running.</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Available projects</h2>
+    <div id="projects"><p class="empty">Loading catalog…</p></div>
+  </div>
+</main>
+
+<script>
+const api = (path, opts) => fetch(path, opts).then(r => r.json());
+let enabledSet = new Set();
+
+function renderStatus(s) {
+  document.getElementById('downloaderPill').textContent = 'downloader: ' + (s.downloader || '—');
+  const budget = Object.entries(s.budget || {}).map(([k,v]) => `${k}:${v}`).join('  ') || '—';
+  document.getElementById('budgetPill').textContent = 'budget: ' + budget;
+  if (document.activeElement.id !== 'downloader')
+    document.getElementById('downloader').value = s.downloader || '';
+  if (document.activeElement.id !== 'maxItems')
+    document.getElementById('maxItems').value = s.max_concurrent_items || '';
+  document.getElementById('noDownloader').style.display = s.downloader ? 'none' : 'block';
+
+  const tb = document.getElementById('workers');
+  const ws = s.workers || [];
+  tb.innerHTML = ws.length ? '' : '<tr><td colspan="7" class="empty">No workers running.</td></tr>';
+  for (const w of ws) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${w.title || w.project}</td>
+      <td><span class="state ${w.state}">${w.state}</span></td>
+      <td class="num">${w.concurrent_items}</td>
+      <td class="num">${w.items_done}</td>
+      <td class="num">${w.items_failed}</td>
+      <td class="meta">${w.last_error || ''}</td>
+      <td><button class="ghost" data-restart="${w.project}">Restart</button></td>`;
+    tb.appendChild(tr);
+  }
+  tb.querySelectorAll('button[data-restart]').forEach(b => b.onclick = () =>
+    fetch(`/api/projects/${b.dataset.restart}/restart`, {method:'POST'}).then(load));
+}
+
+function renderProjects(p) {
+  enabledSet = new Set(p.enabled || []);
+  const box = document.getElementById('projects');
+  const list = p.projects || [];
+  box.innerHTML = list.length ? '' : '<p class="empty">No projects in the catalog yet.</p>';
+  for (const proj of list) {
+    const on = enabledSet.has(proj.name);
+    const div = document.createElement('div');
+    div.className = 'proj';
+    const conc = on
+      ? `<label style="margin-left:auto">items <input type="number" min="1" style="width:64px"
+            value="${proj.concurrent_items || ''}" placeholder="auto" data-conc="${proj.name}"></label>`
+      : '<span class="switch"></span>';
+    div.innerHTML = `<div><div class="title">${proj.title || proj.name}</div>
+      <div class="meta">${proj.name} · ${proj.source}</div></div>
+      ${conc}
+      <button class="${on ? 'danger' : ''}" data-name="${proj.name}" data-on="${on}">
+        ${on ? 'Disable' : 'Enable'}</button>`;
+    box.appendChild(div);
+  }
+  box.querySelectorAll('button[data-name]').forEach(b => b.onclick = async () => {
+    const name = b.dataset.name, on = b.dataset.on === 'true';
+    await fetch(`/api/projects/${name}/${on ? 'disable' : 'enable'}`, {method:'POST'});
+    load();
+  });
+  box.querySelectorAll('input[data-conc]').forEach(inp => inp.onchange = () =>
+    fetch(`/api/projects/${inp.dataset.conc}/concurrency`,
+      {method:'POST', headers:{'Content-Type':'application/json'},
+       body: JSON.stringify({concurrent_items: Number(inp.value) || null})}).then(load));
+}
+
+async function load() {
+  renderStatus(await api('/api/status'));
+  renderProjects(await api('/api/projects'));
+}
+
+document.getElementById('saveSettings').onclick = async () => {
+  await api('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      downloader: document.getElementById('downloader').value,
+      max_concurrent_items: Number(document.getElementById('maxItems').value) || 1,
+    })});
+  load();
+};
+document.getElementById('refresh').onclick = () => fetch('/api/refresh', {method:'POST'}).then(load);
+document.getElementById('stopAll').onclick = () => fetch('/api/stop', {method:'POST'}).then(load);
+
+// Live updates over WebSocket, with polling fallback.
+function connect() {
+  const conn = document.getElementById('conn');
+  let ws;
+  try { ws = new WebSocket(`ws://${location.host}/ws`); } catch { return poll(); }
+  ws.onopen = () => conn.textContent = 'live';
+  ws.onmessage = (e) => { const d = JSON.parse(e.data); renderStatus(d.status); renderProjects(d.projects); };
+  ws.onclose = () => { conn.textContent = 'reconnecting…'; setTimeout(connect, 2000); };
+  ws.onerror = () => ws.close();
+}
+function poll() {
+  document.getElementById('conn').textContent = 'polling';
+  load(); setInterval(load, 3000);
+}
+load().then(connect);
+</script>
+</body>
+</html>
