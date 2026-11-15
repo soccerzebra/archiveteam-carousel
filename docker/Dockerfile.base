@@ -26,6 +26,7 @@ ENTRYPOINT []
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       python3.11 python3.11-venv python3.11-dev python3-distutils python3-pip \
+      curl \
  && rm -rf /var/lib/apt/lists/* \
  && ln -sf /usr/bin/python3.11 /usr/local/bin/python3 \
  && ln -sf /usr/bin/python3.11 /usr/local/bin/python \
@@ -36,6 +37,14 @@ RUN apt-get update \
 # Deps project pipelines import directly (tornado/requests/zstandard) + our tracker client.
 RUN python3 -m pip install --no-cache-dir \
       "httpx>=0.27" "tornado>=6.4" "requests>=2.32" "zstandard>=0.22"
+
+# crane (google/go-containerregistry): a static, daemon-free client that reads image
+# registries directly. The installer uses it to export a docker-only project's /grab dir
+# (no git repo) and run it as a process like any other project — no nested containers.
+RUN curl -fsSL \
+      https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_Linux_x86_64.tar.gz \
+    | tar -xz -C /usr/local/bin crane \
+ && crane version
 
 # Make wget-at discoverable at the paths project pipelines probe, and create data dirs.
 # Projects ask for a specific TLS variant (nss/openssl/gnutls); point them all at the

@@ -5,21 +5,29 @@ Two source kinds, both ending in a plain directory containing
 process-per-project model:
 
   * GIT    : git clone / git pull the repository.
-  * DOCKER : (not yet) `crane export` the image and untar its ``/grab`` dir.
+  * DOCKER : `crane export` the image and untar its ``/grab`` dir. Some projects publish no
+    git repo; their code (pipeline.py, .lua, warrior-install.sh, bundled data) lives only in
+    the image. A docker project's /grab is structurally identical to a git checkout, so once
+    extracted it runs through the exact same path (install hook + shared wget-at).
 
-Each install is copied to a version-pinned dir (``<name>-<githash>``) so an in-flight item
-keeps its exact code even if the project updates. Version dirs are reference-counted across
-all active workers: a dir is removed only when no worker still references it.
+Each install is copied to a version-pinned dir (``<name>-<tag>``: a git short hash, or a
+docker image digest prefix) so an in-flight item keeps its exact code even if the project
+updates. Version dirs are reference-counted across all active workers: a dir is removed only
+when no worker still references it.
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 import shutil
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .models import ProjectInfo, ProjectSource
+
+_DIGEST_RE = re.compile(r"sha256:([0-9a-f]{64})")
 
 
 async def _run(*args: str, cwd: str | None = None) -> str:
@@ -50,20 +58,20 @@ class ProjectInstaller:
 
     async def prepare(self, info: ProjectInfo) -> Path:
         """Install/update the project, pin the current version, acquire it; return the dir."""
-        checkout = await self.install(info)
-        version_dir = await self.pin_version(info, checkout)
+        checkout, tag = await self.install(info)
+        version_dir = self.pin_version(info, checkout, tag)
         self.acquire(version_dir)
         return version_dir
 
-    async def install(self, info: ProjectInfo) -> Path:
+    async def install(self, info: ProjectInfo) -> tuple[Path, str]:
+        """Fetch the project's code into its checkout dir; return (checkout, version_tag)."""
         if info.source is ProjectSource.DOCKER:
-            raise NotImplementedError(
-                "docker-image projects (crane export of /grab) are not implemented yet; "
-                "use the git `repository` source."
-            )
+            return await self._install_docker(info)
+        return await self._install_git(info)
+
+    async def _install_git(self, info: ProjectInfo) -> tuple[Path, str]:
         if not info.repository:
             raise ValueError(f"project {info.name} has no git repository")
-
         checkout = self.projects_dir / info.name
         if (checkout / ".git").exists():
             await _run("git", "fetch", "--depth", "1", "origin", cwd=str(checkout))
@@ -75,40 +83,68 @@ class ProjectInstaller:
             # their client code in a submodule the pipeline imports; a plain clone leaves it
             # empty. --shallow-submodules keeps the extra fetch cheap.
             await _run(
-                "git",
-                "clone",
-                "--depth",
-                "1",
-                "--recurse-submodules",
-                "--shallow-submodules",
-                info.repository,
-                str(checkout),
+                "git", "clone", "--depth", "1", "--recurse-submodules", "--shallow-submodules",
+                info.repository, str(checkout),
             )
         # Make sure submodules are present and current on both clone and fetch paths.
         if (checkout / ".gitmodules").exists():
             await _run(
-                "git",
-                "submodule",
-                "update",
-                "--init",
-                "--recursive",
-                "--depth",
-                "1",
+                "git", "submodule", "update", "--init", "--recursive", "--depth", "1",
                 cwd=str(checkout),
             )
-        return checkout
-
-    async def pin_version(self, info: ProjectInfo, checkout: Path) -> Path:
         git_hash = await _run("git", "rev-parse", "--short", "HEAD", cwd=str(checkout))
-        version_dir = self.versions_dir / f"{info.name}-{git_hash}"
+        return checkout, git_hash
+
+    async def _install_docker(self, info: ProjectInfo) -> tuple[Path, str]:
+        """Extract a docker-only project's /grab dir with crane (no daemon, no nested container).
+
+        ``crane export`` streams the image's flattened filesystem as a tar; we keep only the
+        ``grab/`` subtree (the project's pipeline + assets), stripping the prefix so the dir
+        looks exactly like a git checkout. Pinned by image digest.
+        """
+        if not info.docker:
+            raise ValueError(f"project {info.name} has no docker image")
+        tag = await self._image_tag(info.docker)
+        checkout = self.projects_dir / info.name
+        # Do the heavy export + extraction in a container-local temp dir: it's fast, and tar can
+        # create symlinks there (e.g. grab/wget-at) — on a macOS bind-mounted volume it cannot.
+        # Then copy into the checkout with copytree(symlinks=True), which recreates symlinks via
+        # os.symlink (that DOES work on the mount).
+        with tempfile.TemporaryDirectory(prefix=f"carousel-{info.name}-") as tmp:
+            tar_path = Path(tmp) / "image.tar"
+            grab = Path(tmp) / "grab"
+            grab.mkdir()
+            await _run("crane", "export", info.docker, str(tar_path))
+            # keep only grab/*, dropping the leading "grab/" so files land at the root
+            await _run(
+                "tar", "-x", "-C", str(grab), "--strip-components=1", "-f", str(tar_path), "grab"
+            )
+            if checkout.exists():
+                shutil.rmtree(checkout)
+            shutil.copytree(grab, checkout, symlinks=True)
+        return checkout, tag
+
+    async def _image_tag(self, image: str) -> str:
+        """Short, stable version tag for a docker image: the first 12 hex of its digest."""
+        out = await _run("crane", "digest", image)
+        m = _DIGEST_RE.search(out)
+        if not m:
+            raise RuntimeError(f"crane digest {image} returned no sha256 digest:\n{out}")
+        return m.group(1)[:12]
+
+    def pin_version(self, info: ProjectInfo, checkout: Path, tag: str) -> Path:
+        version_dir = self.versions_dir / f"{info.name}-{tag}"
         if not version_dir.exists():
             shutil.copytree(checkout, version_dir)
         return version_dir
 
     async def has_update(self, info: ProjectInfo, current_version_dir: Path) -> bool:
-        """True if the project's upstream HEAD differs from the running pinned version."""
+        """True if the project's upstream version differs from the running pinned one."""
         if info.source is ProjectSource.DOCKER:
-            return False  # docker-image update detection is M4
+            if not info.docker:
+                return False
+            tag = await self._image_tag(info.docker)
+            return current_version_dir.name != f"{info.name}-{tag}"
         checkout = self.projects_dir / info.name
         if not (checkout / ".git").exists():
             return False
