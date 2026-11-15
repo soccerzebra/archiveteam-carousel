@@ -124,6 +124,12 @@
   .proj:last-child { border-bottom:0; }
   .proj .title { font-weight:550; }
   .proj .meta { color:var(--muted); font-size:12px; }
+  .atchoice { display:flex; gap:12px; align-items:flex-start; padding:12px; margin-bottom:12px;
+              border:1px solid var(--border); border-radius:10px; background:var(--panel2); }
+  .atchoice .title { font-weight:600; }
+  .attag { display:inline-block; margin-left:6px; font-size:10px; font-weight:600; padding:1px 6px;
+           border-radius:5px; color:var(--accent); background:var(--accent-soft);
+           vertical-align:middle; }
   .proj .src { font-size:11px; color:var(--muted); border:1px solid var(--border);
                border-radius:6px; padding:1px 7px; margin-left:8px; vertical-align:middle; }
   .proj .plogo { width:46px; height:46px; flex:0 0 auto; object-fit:contain; border-radius:8px;
@@ -249,8 +255,17 @@
       <section id="view-projects" class="view">
         <div class="card">
           <h2>Projects</h2>
-          <p class="sub">Toggle which projects this warrior runs. Enabled projects share the
-            global concurrency budget; set a per-project override on the right.</p>
+          <p class="sub">Toggle which projects this warrior runs. Each runs at its own thread
+            count (set on the right, default from Settings).</p>
+          <div class="atchoice">
+            <label class="switch"><input type="checkbox" id="atChoice"><span class="slider"></span></label>
+            <div>
+              <div class="title">ArchiveTeam's Choice</div>
+              <div class="meta" id="atChoiceNote">Let ArchiveTeam pick projects for you — the
+                current priority campaigns run on top of your own selection, refreshed
+                automatically.</div>
+            </div>
+          </div>
           <div class="actions" style="margin-bottom:10px">
             <input type="text" id="projFilter" placeholder="Filter projects…" style="max-width:240px">
             <span class="grow"></span>
@@ -437,6 +452,14 @@ function renderStatus(s) {
   set('warnThreads', s.warn_total_threads || '');
   set('rsyncThreads', s.max_rsync_threads || '');
   set('httpUser', s.http_username || '');
+  const atc = document.getElementById('atChoice');
+  if (document.activeElement !== atc) atc.checked = !!s.archiveteam_choice;
+  const atNote = document.getElementById('atChoiceNote');
+  const picks = s.auto_projects || [];
+  atNote.textContent = !s.archiveteam_choice
+    ? "Let ArchiveTeam pick projects for you — the current priority campaigns run on top of your own selection, refreshed automatically."
+    : picks.length ? 'On — currently running: ' + picks.join(', ') + '.'
+    : "On — waiting for ArchiveTeam's current picks…";
   if (document.activeElement.id !== 'bwLimit')
     document.getElementById('bwLimit').value = bw ? (bw / 1e6) : '';
   updateBwNote();
@@ -495,12 +518,15 @@ function renderProjects(p) {
       ? `<img class="plogo" src="${esc(proj.logo)}" alt="" loading="lazy"
             onerror="this.style.visibility='hidden'">`
       : `<span class="plogo"></span>`;
+    const forced = !!proj.at_choice;  // forced on by ArchiveTeam's Choice — locked
+    const tag = forced ? `<span class="attag" title="Run by ArchiveTeam's Choice">AT's Choice</span>` : '';
     div.innerHTML = `
-      <label class="switch"><input type="checkbox" ${on?'checked':''} data-name="${esc(proj.name)}">
+      <label class="switch" title="${forced ? "Forced on by ArchiveTeam's Choice" : ''}">
+        <input type="checkbox" ${on?'checked':''} ${forced?'disabled':''} data-name="${esc(proj.name)}">
         <span class="slider"></span></label>
       ${logo}
       <div style="flex:1;min-width:0">
-        <div class="title">${esc(proj.title || proj.name)}<span class="src">${esc(proj.source)}</span></div>
+        <div class="title">${esc(proj.title || proj.name)}${tag}<span class="src">${esc(proj.source)}</span></div>
         ${proj.description ? `<div class="meta pdesc">${esc(proj.description)}</div>` : ''}
         <div class="meta">${esc(proj.name)}</div>
       </div>
@@ -519,6 +545,9 @@ function renderProjects(p) {
       {method:'POST', headers:{'Content-Type':'application/json'},
        body: JSON.stringify({concurrent_items: Number(inp.value) || null})}).then(load));
 }
+document.getElementById('atChoice').onchange = (e) =>
+  fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({archiveteam_choice: e.target.checked})}).then(load);
 document.getElementById('projFilter').oninput = () => api('/api/projects').then(renderProjects);
 document.getElementById('refresh').onclick = () =>
   fetch('/api/refresh', {method:'POST'}).then(load);

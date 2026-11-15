@@ -10,11 +10,27 @@ against the live endpoint.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 import httpx
 
 from .models import ProjectInfo, ProjectSource
 
 DEFAULT_HQ = "https://warriorhq.archiveteam.org"
+
+
+@dataclass
+class CatalogUpdate:
+    """One heartbeat's worth of HQ state: the full catalog plus ArchiveTeam's current picks.
+
+    ``auto_projects`` is the ordered set of projects HQ is prioritizing right now — the
+    ``auto_projects_config`` list (weighted), or ``[auto_project]`` if HQ sends only the legacy
+    single field. It drives "ArchiveTeam's Choice". We keep HQ's order but ignore the weights
+    for now: every picked project runs at the user's default thread count.
+    """
+
+    projects: list[ProjectInfo]
+    auto_projects: list[str] = field(default_factory=list)
 
 # Identity HQ sees. Must match the warrior exactly: the version gates project compatibility,
 # and the User-Agent is what HQ expects (an empty/foreign one is rejected). Same strings the
@@ -46,12 +62,13 @@ class HQClient:
 
     async def heartbeat(
         self, warrior_id: str, downloader: str, selected: list[str]
-    ) -> list[ProjectInfo]:
-        """POST /api/update.json -> catalog.
+    ) -> CatalogUpdate:
+        """POST /api/update.json -> catalog + ArchiveTeam's current picks.
 
         HQ's protocol carries a single ``selected_project``; we run many at once, so the
         heartbeat reports a primary (the enabled set is driven locally by the supervisor,
-        not by HQ's selection) and we keep the full catalog HQ returns.
+        not by HQ's selection) and we keep the full catalog HQ returns, plus the auto-pick
+        set for "ArchiveTeam's Choice".
         """
         payload = {
             "warrior": {
@@ -67,10 +84,24 @@ class HQClient:
             json=payload,
         )
         resp.raise_for_status()
-        return [_parse_project(p) for p in resp.json().get("projects", [])]
+        data = resp.json()
+        projects = [_parse_project(p) for p in data.get("projects", [])]
+        return CatalogUpdate(projects=projects, auto_projects=_auto_projects(data))
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+
+def _auto_projects(data: dict) -> list[str]:
+    """ArchiveTeam's current picks, in HQ's order: the weighted ``auto_projects_config`` list,
+    else the legacy single ``auto_project``, else empty."""
+    config = data.get("auto_projects_config")
+    if isinstance(config, list) and config:
+        names = [e.get("project") for e in config if isinstance(e, dict) and e.get("project")]
+        if names:
+            return names
+    single = data.get("auto_project")
+    return [single] if single else []
 
 
 def _parse_project(p: dict) -> ProjectInfo:

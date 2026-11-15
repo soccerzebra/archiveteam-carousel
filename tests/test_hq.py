@@ -16,7 +16,12 @@ CATALOG = {
     "projects": [
         {"name": "urls", "title": "URLs", "repository": "git://x/urls"},
         {"name": "instagram", "title": "Instagram", "docker": "atdr/ig", "repository": ""},
-    ]
+    ],
+    "auto_project": "urls",
+    "auto_projects_config": [
+        {"project": "instagram", "weight": 6},
+        {"project": "urls", "weight": 2},
+    ],
 }
 
 
@@ -48,7 +53,7 @@ async def test_register_sends_warrior_body_and_user_agent():
 async def test_heartbeat_wraps_payload_and_parses_catalog():
     seen = []
     hq = make_client(seen)
-    projects = await hq.heartbeat("wid-123", downloader="josh", selected=["urls"])
+    update = await hq.heartbeat("wid-123", downloader="josh", selected=["urls"])
     req = seen[0]
     assert req.url.path == "/api/update.json"
     assert req.headers["user-agent"] == UA_UPDATE == "ArchiveTeam Warrior/0.10.3 Warrior"
@@ -62,9 +67,18 @@ async def test_heartbeat_wraps_payload_and_parses_catalog():
         }
     }
     # catalog parsing: git vs docker classification
-    by_name = {p.name: p for p in projects}
+    by_name = {p.name: p for p in update.projects}
     assert by_name["urls"].source is ProjectSource.GIT
     assert by_name["instagram"].source is ProjectSource.DOCKER
+    await hq.aclose()
+
+
+async def test_heartbeat_parses_auto_projects_in_hq_order():
+    seen = []
+    hq = make_client(seen)
+    update = await hq.heartbeat("wid-123", downloader="josh", selected=[])
+    # the weighted config wins over the single auto_project, kept in HQ's order
+    assert update.auto_projects == ["instagram", "urls"]
     await hq.aclose()
 
 

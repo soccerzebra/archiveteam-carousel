@@ -132,6 +132,21 @@ def test_budget_disabling_does_not_grow_others(tmp_path):
     assert sup.budget() == {"urls": 2}  # urls unchanged
 
 
+def test_forced_projects_union_with_manual(tmp_path):
+    # ArchiveTeam's Choice (forced) adds to the manual selection, deduped, at default threads
+    config, sup = make_supervisor(tmp_path, default_threads=2)
+    config.project("urls").enabled = True  # manual
+    sup.forced = {"urls", "reddit"}  # AT's Choice picks urls (dup) + reddit
+    assert sup.budget() == {"urls": 2, "reddit": 2}  # no duplicate, forced runs at default
+
+
+async def test_reconcile_starts_forced_projects(tmp_path):
+    config, sup = make_supervisor(tmp_path)
+    sup.forced = {"reddit"}  # forced only, no manual selection
+    await sup.reconcile()
+    assert set(sup.workers) == {"reddit"}
+
+
 def test_apply_status_line_progression():
     s = WorkerStatus(project="urls")
     apply_status_line(s, '{"event":"loaded","title":"URLs"}')

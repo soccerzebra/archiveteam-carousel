@@ -246,6 +246,9 @@ class Supervisor:
         self.drain_timeout = drain_timeout
         self.workers: dict[str, WorkerHandle] = {}
         self.catalog: dict[str, ProjectInfo] = {}
+        # Projects force-run by "ArchiveTeam's Choice", unioned with the user's manual
+        # selection. Set by ControlPlane from each heartbeat; empty when the mode is off.
+        self.forced: set[str] = set()
         self._draining: set[WorkerHandle] = set()
         self._drain_tasks: set[asyncio.Task[None]] = set()
         self._shutting_down = False
@@ -255,7 +258,9 @@ class Supervisor:
         self.catalog = {p.name: p for p in projects}
 
     def _desired(self) -> list[str]:
-        return [n for n in self.config.enabled_projects() if n in self.catalog]
+        # user's manual selection + ArchiveTeam's Choice picks (forced), deduped, catalog-only
+        names = list(dict.fromkeys([*self.config.enabled_projects(), *self.forced]))
+        return [n for n in names if n in self.catalog]
 
     def budget(self) -> dict[str, int]:
         """Per-project thread counts — absolute, not a divided global pie.

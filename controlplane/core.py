@@ -26,6 +26,7 @@ class ControlPlane:
         self.supervisor = supervisor
         self.hq = hq
         self.stats = stats
+        self._auto_projects: list[str] = []  # ArchiveTeam's current picks (last heartbeat)
 
     async def heartbeat_once(self) -> None:
         """Register (first time), fetch the HQ catalog, then reconcile workers."""
@@ -36,12 +37,19 @@ class ControlPlane:
         if not gc.warrior_id:
             gc.warrior_id = await self.hq.register()
             self.config.save()
-        projects = await self.hq.heartbeat(
+        update = await self.hq.heartbeat(
             gc.warrior_id, gc.downloader, self.config.enabled_projects()
         )
-        self.supervisor.set_catalog(projects)
+        self.supervisor.set_catalog(update.projects)
+        self._auto_projects = update.auto_projects
+        self._apply_choice()
         await self.supervisor.reconcile()
         await self.supervisor.check_updates()
+
+    def _apply_choice(self) -> None:
+        """Set the supervisor's forced set from ArchiveTeam's Choice (empty when off)."""
+        gc = self.config.global_config
+        self.supervisor.forced = set(self._auto_projects) if gc.archiveteam_choice else set()
 
     async def monitor_once(self) -> None:
         """Fast loop: restart crashed workers, re-apply budget. No network."""
@@ -54,6 +62,8 @@ class ControlPlane:
         return {
             "downloader": gc.downloader,
             "warrior_id": gc.warrior_id,
+            "archiveteam_choice": gc.archiveteam_choice,
+            "auto_projects": list(self._auto_projects),
             "default_project_threads": gc.default_project_threads,
             "warn_total_threads": gc.warn_total_threads,
             "max_rsync_threads": gc.max_rsync_threads,
@@ -81,14 +91,17 @@ class ControlPlane:
 
     def projects(self) -> dict:
         enabled = set(self.config.enabled_projects())
+        auto = set(self._auto_projects) if self.config.global_config.archiveteam_choice else set()
         rows = []
         for p in self.supervisor.catalog.values():
             row = p.model_dump()
-            row["enabled"] = p.name in enabled
+            # a project is on when manually enabled OR force-run by ArchiveTeam's Choice
+            row["at_choice"] = p.name in auto  # tagged + locked in the UI while choice is on
+            row["enabled"] = p.name in enabled or p.name in auto
             pc = self.config.projects.get(p.name)
             row["concurrent_items"] = pc.concurrent_items if pc else None
             rows.append(row)
-        return {"projects": rows, "enabled": self.config.enabled_projects()}
+        return {"projects": rows, "enabled": [r["name"] for r in rows if r["enabled"]]}
 
     async def set_enabled(self, name: str, enabled: bool) -> None:
         pc = self.config.project(name)
@@ -114,6 +127,9 @@ class ControlPlane:
         gc = self.config.global_config
         if "downloader" in data:
             gc.downloader = str(data["downloader"]).strip()
+        if "archiveteam_choice" in data:
+            gc.archiveteam_choice = bool(data["archiveteam_choice"])
+            self._apply_choice()  # apply from the last heartbeat's picks; next beat refreshes
         if "default_project_threads" in data:
             gc.default_project_threads = clamp_threads(data["default_project_threads"])
         if "warn_total_threads" in data:

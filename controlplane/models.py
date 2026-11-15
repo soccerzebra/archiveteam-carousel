@@ -87,9 +87,13 @@ class GlobalConfig(BaseModel):
     # project the first time it's enabled. ``warn_total_threads`` is a soft, non-enforced
     # advisory: the UI flags when the sum of running threads exceeds it (0 = no warning). It
     # NEVER rescales a project.
-    default_project_threads: int = 1
+    default_project_threads: int = 2  # matches ArchiveTeam's warrior default
     warn_total_threads: int = 0
     max_rsync_threads: int = 20
+    # "ArchiveTeam's Choice": when true, the projects HQ currently prioritizes are force-run
+    # (at default_project_threads) ON TOP OF the user's manual selection, and refreshed on the
+    # HQ heartbeat. See ControlPlane / Supervisor.forced.
+    archiveteam_choice: bool = False
     # Global download rate cap in bytes/sec (0 = unlimited). The supervisor divides this
     # across all active download slots and passes each worker its per-download share.
     bandwidth_limit: int = 0
