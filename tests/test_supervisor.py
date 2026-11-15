@@ -12,10 +12,11 @@ from controlplane.supervisor import Supervisor, apply_status_line, split_budget
 
 
 class FakeWorker:
-    def __init__(self, project, version_dir, concurrent_items):
+    def __init__(self, project, version_dir, concurrent_items, limit_rate=0):
         self.project = project
         self.version_dir = version_dir
         self.concurrent_items = concurrent_items
+        self.limit_rate = limit_rate
         self.stopped = False
         self.status = WorkerStatus(project=project, state=WorkerState.RUNNING,
                                    concurrent_items=concurrent_items)
@@ -31,9 +32,10 @@ class FakeBackend:
     def __init__(self):
         self.spawns = []
 
-    async def spawn(self, project, version_dir, concurrent_items, downloader, data_dir):
+    async def spawn(self, project, version_dir, concurrent_items, downloader, data_dir,
+                    limit_rate=0):
         self.spawns.append((project, concurrent_items, downloader))
-        return FakeWorker(project, version_dir, concurrent_items)
+        return FakeWorker(project, version_dir, concurrent_items, limit_rate)
 
 
 class FakeInstaller:
@@ -81,10 +83,20 @@ def test_apply_status_line_progression():
     assert s.title == "URLs"
     apply_status_line(s, '{"event":"running","concurrent_items":3}')
     assert s.state is WorkerState.RUNNING and s.concurrent_items == 3
-    apply_status_line(s, '{"event":"item_end","completed":5,"failed":1}')
+    apply_status_line(s, '{"event":"item_end","completed":5,"failed":1,"bytes":1000}')
     assert s.items_done == 5 and s.items_failed == 1
+    apply_status_line(s, '{"event":"item_end","completed":6,"failed":1,"bytes":500}')
+    assert s.items_done == 6 and s.bytes_uploaded == 1500  # bytes accumulate across items
     apply_status_line(s, '{"event":"stopped","completed":6,"failed":1}')
     assert s.state is WorkerState.STOPPED and s.items_done == 6
+
+
+def test_apply_status_line_returns_event():
+    s = WorkerStatus(project="urls")
+    event = apply_status_line(s, '{"event":"item_end","completed":1,"failed":0,"bytes":42}')
+    assert event == {"event": "item_end", "completed": 1, "failed": 0, "bytes": 42}
+    assert apply_status_line(s, "not json") is None
+    assert apply_status_line(s, "") is None
 
 
 def test_apply_status_line_ignores_garbage():
@@ -164,6 +176,27 @@ async def test_check_updates_restarts_stale_worker(tmp_path):
     await sup.check_updates()
     assert sup.workers["urls"] is not original          # restarted on update
     assert len(sup.backend.spawns) == 2
+
+
+async def test_download_rate_splits_global_limit(tmp_path):
+    config, sup = make_supervisor(tmp_path, max_items=6)
+    config.global_config.bandwidth_limit = 0
+    assert sup.download_rate() == 0  # unlimited by default
+    config.project("urls").enabled = True
+    config.project("reddit").enabled = True
+    config.global_config.bandwidth_limit = 6_000_000  # 6 MB/s across 6 slots (3 + 3)
+    assert sup.download_rate() == 1_000_000
+
+
+async def test_bandwidth_change_restarts_workers(tmp_path):
+    config, sup = make_supervisor(tmp_path, max_items=4)
+    config.project("urls").enabled = True
+    await sup.reconcile()
+    assert sup.workers["urls"].limit_rate == 0
+    config.global_config.bandwidth_limit = 4_000_000  # 4 MB/s over 4 slots => 1 MB/s each
+    await sup.reconcile()
+    assert sup.workers["urls"].limit_rate == 1_000_000
+    assert len(sup.backend.spawns) == 2  # restarted to apply the new rate
 
 
 async def test_snapshot_reports_all_workers(tmp_path):

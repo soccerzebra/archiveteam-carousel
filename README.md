@@ -22,12 +22,29 @@ ArchiveTeam projects and the live tracker. Details and the upstream analysis are
 - `docker/` — base (worker runtime) and control-plane images.
 - `reference/` — upstream repos we study (gitignored, not shipped).
 
+## Web dashboard
+
+The control plane serves a single live dashboard (FastAPI + WebSocket) on `:8001` for every
+project at once:
+
+- **Pick projects** — enable/disable each project from the HQ catalog, with an optional
+  per-project concurrency override.
+- **Start/stop** — enabling a project starts a worker; disabling stops it; "Stop all" halts
+  everything. Nothing runs until a downloader handle is set.
+- **Downloader identity** — one handle for all projects (shown on the leaderboards).
+- **Bandwidth limit** — a global download cap in MB/s, with a live "≈ X GB/day" readout. The
+  supervisor divides it across all active download slots and passes each worker its share via
+  a generated `wgetrc` (`limit_rate`); `0` means unlimited.
+- **Stats over time** — a bucketed chart of data archived and items done/failed over the last
+  24h, plus totals, backed by an on-disk SQLite history (`STATS_DB`, default
+  `$WARRIOR_HOME/projects/stats.db`) that survives restarts.
+
 ## Development
 
 ```bash
 python3.11 -m venv .venv && . .venv/bin/activate   # 3.11 — projects use distutils (gone in 3.12)
 pip install -e '.[dev]'
-pytest                 # 63 tests, all offline (no network, no production tracker)
+pytest                 # 72 tests, all offline (no network, no production tracker)
 ```
 
 ## Tests & validation
@@ -47,7 +64,8 @@ binaries** (`curl`, `rsync`) against a local server.
 | `test_externalprocess.py` | `wget`/`rsync`/`curl` argv compatibility + real subprocess run/retry/accept logic. |
 | `test_load_and_run.py` | Loading a real-shaped `pipeline.py`, downloader injection, independent loads, claim→done vs. a fake tracker. |
 | `test_full_chain.py` | **Hermetic full chain**: claim → `curl` download → stats → `curl`/`rsync` upload → done, asserting uploaded bytes + `/done` stats exactly. |
-| `test_supervisor.py` | Budget split, status parsing, reconcile (start/stop/restart), crash recovery, update detection. |
+| `test_supervisor.py` | Budget split, bandwidth split, status parsing, reconcile (start/stop/restart), crash recovery, update detection. |
+| `test_stats.py` | SQLite stats history: record, bucketed time-series read, window filtering, persistence across reopen. |
 | `test_app.py` | HTTP API (status, projects, enable/disable, settings, restart, concurrency) via `TestClient`. |
 | `test_surface.py` | Our `seesaw` exports every symbol real projects import. |
 

@@ -21,22 +21,15 @@ import os
 import signal
 import sys
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from .config import ConfigStore
 from .models import ProjectInfo, WorkerState, WorkerStatus
 from .projects import ProjectInstaller
 
 
-def apply_status_line(status: WorkerStatus, line: str) -> None:
-    """Fold one JSON status line emitted by a worker into its WorkerStatus."""
-    line = line.strip()
-    if not line:
-        return
-    try:
-        event = json.loads(line)
-    except json.JSONDecodeError:
-        return  # non-JSON output (shouldn't happen on the status channel) is ignored
+def apply_status_event(status: WorkerStatus, event: dict) -> None:
+    """Fold one already-parsed worker event into its WorkerStatus."""
     kind = event.get("event")
     if kind == "install_hook":
         status.state = WorkerState.STARTING
@@ -48,10 +41,28 @@ def apply_status_line(status: WorkerStatus, line: str) -> None:
     elif kind == "item_end":
         status.items_done = event.get("completed", status.items_done)
         status.items_failed = event.get("failed", status.items_failed)
+        status.bytes_uploaded += int(event.get("bytes", 0) or 0)
     elif kind == "stopped":
         status.state = WorkerState.STOPPED
         status.items_done = event.get("completed", status.items_done)
         status.items_failed = event.get("failed", status.items_failed)
+
+
+def apply_status_line(status: WorkerStatus, line: str) -> dict | None:
+    """Parse one JSON status line from a worker, fold it in, and return the event.
+
+    Returns the parsed event (so callers can forward it, e.g. to the stats store) or None
+    for blank / non-JSON lines, which are ignored.
+    """
+    line = line.strip()
+    if not line:
+        return None
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        return None  # non-JSON output (shouldn't happen on the status channel) is ignored
+    apply_status_event(status, event)
+    return event
 
 
 def split_budget(projects: list[str], total: int, overrides: dict[str, int]) -> dict[str, int]:
@@ -79,6 +90,7 @@ def split_budget(projects: list[str], total: int, overrides: dict[str, int]) -> 
 class WorkerHandle(Protocol):
     project: str
     concurrent_items: int
+    limit_rate: int
     version_dir: Path
 
     async def stop(self, graceful: bool = True) -> None: ...
@@ -87,18 +99,22 @@ class WorkerHandle(Protocol):
 
 class WorkerBackend(Protocol):
     async def spawn(self, project: str, version_dir: Path, concurrent_items: int,
-                    downloader: str, data_dir: str) -> WorkerHandle: ...
+                    downloader: str, data_dir: str,
+                    limit_rate: int = 0) -> WorkerHandle: ...
 
 
 class SubprocessWorker:
     """A worker running as ``python -m worker.run_pipeline`` in its own process."""
 
     def __init__(self, project: str, version_dir: Path, concurrent_items: int,
-                 proc: asyncio.subprocess.Process):
+                 proc: asyncio.subprocess.Process, limit_rate: int = 0,
+                 on_event: Callable[[str, dict], None] | None = None):
         self.project = project
         self.version_dir = version_dir
         self.concurrent_items = concurrent_items
+        self.limit_rate = limit_rate
         self._proc = proc
+        self._on_event = on_event
         self.status = WorkerStatus(project=project, state=WorkerState.STARTING,
                                    pid=proc.pid, concurrent_items=concurrent_items)
         self._reader = asyncio.create_task(self._read_status())
@@ -106,7 +122,9 @@ class SubprocessWorker:
     async def _read_status(self) -> None:
         assert self._proc.stdout is not None
         async for raw in self._proc.stdout:
-            apply_status_line(self.status, raw.decode("utf-8", "replace"))
+            event = apply_status_line(self.status, raw.decode("utf-8", "replace"))
+            if event and self._on_event:
+                self._on_event(self.project, event)
         returncode = await self._proc.wait()
         if self.status.state != WorkerState.STOPPED:
             self.status.state = (WorkerState.STOPPED if returncode == 0
@@ -131,11 +149,14 @@ class SubprocessWorker:
 
 
 class SubprocessBackend:
-    def __init__(self, worker_root: Path):
+    def __init__(self, worker_root: Path,
+                 on_event: Callable[[str, dict], None] | None = None):
         # Directory that makes `python -m worker.run_pipeline` importable.
         self.worker_root = str(Path(worker_root).resolve())
+        self.on_event = on_event
 
-    async def spawn(self, project, version_dir, concurrent_items, downloader, data_dir):
+    async def spawn(self, project, version_dir, concurrent_items, downloader, data_dir,
+                    limit_rate=0):
         env = dict(os.environ)
         env["PYTHONPATH"] = self.worker_root + os.pathsep + env.get("PYTHONPATH", "")
         proc = await asyncio.create_subprocess_exec(
@@ -145,12 +166,14 @@ class SubprocessBackend:
             "--downloader", downloader,
             "--concurrent-items", str(concurrent_items),
             "--data-dir", data_dir,
+            "--limit-rate", str(int(limit_rate)),
             cwd=self.worker_root,
             env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=None,  # human/wget logs flow to the control plane's stderr
         )
-        return SubprocessWorker(project, Path(version_dir), concurrent_items, proc)
+        return SubprocessWorker(project, Path(version_dir), concurrent_items, proc,
+                                limit_rate=limit_rate, on_event=self.on_event)
 
 
 class Supervisor:
@@ -176,6 +199,18 @@ class Supervisor:
                      for n in desired if self.config.project(n).concurrent_items}
         return split_budget(desired, self.config.global_config.max_concurrent_items, overrides)
 
+    def download_rate(self) -> int:
+        """Per-download byte/sec cap: the global limit split across every active slot.
+
+        Each worker runs its ``concurrent_items`` downloads at this rate, so the sum across
+        all workers approximates the global ``bandwidth_limit``. 0 means unlimited.
+        """
+        limit = self.config.global_config.bandwidth_limit
+        if limit <= 0:
+            return 0
+        total_slots = sum(self.budget().values()) or 1
+        return max(1, limit // total_slots)
+
     async def reconcile(self) -> None:
         """Make running workers match the enabled set and the current budget."""
         async with self._lock:
@@ -186,6 +221,7 @@ class Supervisor:
                 return
             desired = self._desired()
             budget = self.budget()
+            rate = self.download_rate()
             for name in list(self.workers):
                 if name not in desired:
                     await self._stop(name)
@@ -193,11 +229,12 @@ class Supervisor:
                 want = budget.get(name, 1)
                 current = self.workers.get(name)
                 if current is None:
-                    await self._start(name, want)
-                elif self._is_dead(current) or current.concurrent_items != want:
-                    # restart a crashed/exited worker, or re-slice its budget
+                    await self._start(name, want, rate)
+                elif (self._is_dead(current) or current.concurrent_items != want
+                      or getattr(current, "limit_rate", 0) != rate):
+                    # restart a crashed/exited worker, or re-slice budget / bandwidth
                     await self._stop(name)
-                    await self._start(name, want)
+                    await self._start(name, want, rate)
 
     @staticmethod
     def _is_dead(worker: WorkerHandle) -> bool:
@@ -223,12 +260,13 @@ class Supervisor:
         if stale:
             await self.reconcile()
 
-    async def _start(self, name: str, concurrent_items: int) -> None:
+    async def _start(self, name: str, concurrent_items: int, limit_rate: int = 0) -> None:
         info = self.catalog[name]
         version_dir = await self.installer.prepare(info)
         self.workers[name] = await self.backend.spawn(
             name, version_dir, concurrent_items,
-            self.config.global_config.downloader, self.data_dir)
+            self.config.global_config.downloader, self.data_dir,
+            limit_rate=limit_rate)
 
     async def _stop(self, name: str) -> None:
         worker = self.workers.pop(name)

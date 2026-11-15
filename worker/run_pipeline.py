@@ -28,6 +28,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from seesaw.context import RunContext  # noqa: E402
+from seesaw.item import Item  # noqa: E402
 from runner import Runner  # noqa: E402
 
 
@@ -35,6 +36,23 @@ def emit(obj: dict) -> None:
     """Write one status line for the supervisor."""
     sys.stdout.write(json.dumps(obj) + "\n")
     sys.stdout.flush()
+
+
+def apply_bandwidth_limit(project: str, data_dir: str, limit_rate: int) -> None:
+    """Cap wget's download rate at ``limit_rate`` bytes/sec via a generated wgetrc.
+
+    wget reads its startup file from ``$WGETRC``; we write one with ``limit_rate`` and point
+    the whole worker process (and therefore every wget it spawns) at it. No project pipeline
+    sets ``limit_rate`` or ``WGETRC``, so this is purely additive. ``limit_rate <= 0`` leaves
+    wget unthrottled.
+    """
+    if limit_rate <= 0:
+        return
+    rc_dir = Path(data_dir)
+    rc_dir.mkdir(parents=True, exist_ok=True)
+    rc_path = rc_dir / f"carousel-wgetrc-{project}"
+    rc_path.write_text(f"limit_rate = {int(limit_rate)}\n")
+    os.environ["WGETRC"] = str(rc_path)
 
 
 def load_pipeline(pipeline_path: str, downloader: str, extra_context: dict | None = None):
@@ -82,6 +100,7 @@ def run_install_hook(project_dir: str) -> None:
 
 async def run(args: argparse.Namespace) -> int:
     run_install_hook(str(Path(args.pipeline).resolve().parent))
+    apply_bandwidth_limit(args.project, args.data_dir, args.limit_rate)
 
     project, pipeline = load_pipeline(args.pipeline, args.downloader)
     emit({"event": "loaded", "project": args.project, "title": getattr(project, "title", "")})
@@ -95,6 +114,8 @@ async def run(args: argparse.Namespace) -> int:
             on_item_end=lambda item: emit({
                 "event": "item_end", "project": args.project,
                 "item": item.description(), "state": item.state,
+                "ok": item.state == Item.COMPLETED,
+                "bytes": int(item.get("carousel_bytes", 0)),
                 "completed": runner.completed, "failed": runner.failed,
             }),
         )
@@ -121,6 +142,8 @@ def main() -> None:
     parser.add_argument("--downloader", required=True)
     parser.add_argument("--concurrent-items", type=int, default=1)
     parser.add_argument("--data-dir", default="/home/warrior/data")
+    parser.add_argument("--limit-rate", type=int, default=0,
+                        help="per-download cap in bytes/sec (0 = unlimited)")
     args = parser.parse_args()
     raise SystemExit(asyncio.run(run(args)))
 

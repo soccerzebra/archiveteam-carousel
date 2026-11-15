@@ -122,6 +122,21 @@ class WgetDownload(ExternalProcess):
         return self.stdin_data_function(item) if self.stdin_data_function else b""
 
 
+def _record_bytes(item: Any, paths: list) -> None:
+    """Add the on-disk size of ``paths`` to the item's archived-bytes tally.
+
+    Called after a successful upload, so the files are still present. The total is read by
+    the worker on item completion and reported to the control plane for the stats history.
+    """
+    total = 0
+    for p in paths:
+        try:
+            total += os.path.getsize(p)
+        except OSError:
+            pass
+    item["carousel_bytes"] = int(item.get("carousel_bytes", 0)) + total
+
+
 class RsyncUpload(ExternalProcess):
     def __init__(self, target, files, target_source_path="./", bwlimit="0",
                  max_tries=None, extra_args=None):
@@ -140,6 +155,10 @@ class RsyncUpload(ExternalProcess):
                  for f in realize(self.files, item)]
         return "".join(lines).encode("utf-8")
 
+    async def run(self, item: Any, ctx: Any) -> None:
+        await super().run(item, ctx)
+        _record_bytes(item, [realize(f, item) for f in realize(self.files, item)])
+
 
 class CurlUpload(ExternalProcess):
     def __init__(self, target, filename, connect_timeout="60", speed_limit="1",
@@ -152,3 +171,8 @@ class CurlUpload(ExternalProcess):
                 "--write-out", "Upload server: %{url_effective}\\n",
                 "--location", "--upload-file", filename, target]
         super().__init__("CurlUpload", args=args, max_tries=max_tries)
+        self.filename = filename
+
+    async def run(self, item: Any, ctx: Any) -> None:
+        await super().run(item, ctx)
+        _record_bytes(item, [realize(self.filename, item)])

@@ -73,6 +73,12 @@ def create_app(cp: ControlPlane, *, heartbeat_interval: float = 600.0,
     async def projects() -> JSONResponse:
         return JSONResponse(cp.projects())
 
+    @app.get("/api/stats")
+    async def stats(hours: float = 24.0, buckets: int = 48) -> JSONResponse:
+        hours = min(max(hours, 0.1), 24 * 30)      # clamp: 6 min .. 30 days
+        buckets = min(max(int(buckets), 1), 500)
+        return JSONResponse(cp.stats_series(hours=hours, buckets=buckets))
+
     @app.post("/api/projects/{name}/enable")
     async def enable(name: str) -> JSONResponse:
         await cp.set_enabled(name, True)
@@ -126,18 +132,26 @@ def main() -> None:
 
     from .hq import HQClient
     from .projects import ProjectInstaller
+    from .stats import StatsStore
     from .supervisor import Supervisor, SubprocessBackend
 
     home = Path(os.environ.get("WARRIOR_HOME", "/home/warrior"))
     config = ConfigStore(Path(os.environ.get("CONFIG_FILE", home / "projects" / "config.json")))
     config.load()
 
+    stats = StatsStore(Path(os.environ.get("STATS_DB", home / "projects" / "stats.db")))
+
+    def on_event(project: str, event: dict) -> None:
+        if event.get("event") == "item_end":
+            stats.record_item(project, bool(event.get("ok")), int(event.get("bytes", 0) or 0))
+
     installer = ProjectInstaller(projects_dir=home / "projects", versions_dir=home / "versions")
     worker_root = Path(__file__).resolve().parent.parent  # makes `python -m worker...` import
-    supervisor = Supervisor(config, installer, SubprocessBackend(worker_root),
+    supervisor = Supervisor(config, installer,
+                            SubprocessBackend(worker_root, on_event=on_event),
                             data_dir=str(home / "data"))
     hq = HQClient(os.environ.get("WARRIOR_HQ", "https://warriorhq.archiveteam.org"))
-    cp = ControlPlane(config, supervisor, hq)
+    cp = ControlPlane(config, supervisor, hq, stats=stats)
 
     app = create_app(cp)
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8001")))

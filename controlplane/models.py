@@ -70,6 +70,9 @@ class GlobalConfig(BaseModel):
     # Global resource budget, divided across active projects by the supervisor:
     max_concurrent_items: int = 6
     max_rsync_threads: int = 20
+    # Global download rate cap in bytes/sec (0 = unlimited). The supervisor divides this
+    # across all active download slots and passes each worker its per-download share.
+    bandwidth_limit: int = 0
 
 
 class ProjectConfig(BaseModel):

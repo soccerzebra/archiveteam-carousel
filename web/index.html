@@ -53,6 +53,10 @@
   .empty { color:var(--muted); padding:8px 0; }
   .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   label { color:var(--muted); font-size:12px; }
+  .stat { font-size:22px; font-weight:650; font-variant-numeric:tabular-nums; }
+  #chart .bar { fill:var(--accent); }
+  #chart .axis { stroke:var(--border); }
+  #chart text { fill:var(--muted); font-size:10px; }
 </style>
 </head>
 <body>
@@ -70,6 +74,9 @@
     <div class="row">
       <label>Downloader <input type="text" id="downloader" placeholder="your handle"></label>
       <label>Max concurrent items <input type="number" id="maxItems" min="1" style="width:80px"></label>
+      <label>Bandwidth limit
+        <input type="number" id="bwLimit" min="0" step="0.1" style="width:80px"> MB/s
+        <span class="meta" id="bwNote"></span></label>
       <button id="saveSettings">Save</button>
       <button class="ghost" id="refresh">Refresh catalog</button>
       <button class="danger" id="stopAll">Stop all</button>
@@ -79,11 +86,24 @@
   </div>
 
   <div class="card">
+    <h2>Activity (last 24h)</h2>
+    <div class="row" id="statTiles" style="gap:24px;margin-bottom:14px">
+      <div><div class="stat" id="statDone">0</div><div class="meta">items archived</div></div>
+      <div><div class="stat" id="statBytes">0 B</div><div class="meta">data archived</div></div>
+      <div><div class="stat" id="statFailed">0</div><div class="meta">items failed</div></div>
+      <div><div class="stat" id="statRate">—</div><div class="meta">avg/day (extrapolated)</div></div>
+    </div>
+    <svg id="chart" width="100%" height="160" role="img" aria-label="Data archived over time"></svg>
+    <div class="meta" id="chartEmpty" style="display:none">No activity recorded yet.</div>
+  </div>
+
+  <div class="card">
     <h2>Running projects</h2>
     <table>
       <thead><tr><th>Project</th><th>State</th><th class="num">Concurrency</th>
-        <th class="num">Done</th><th class="num">Failed</th><th>Note</th><th></th></tr></thead>
-      <tbody id="workers"><tr><td colspan="7" class="empty">No workers running.</td></tr></tbody>
+        <th class="num">Done</th><th class="num">Failed</th><th class="num">Archived</th>
+        <th>Note</th><th></th></tr></thead>
+      <tbody id="workers"><tr><td colspan="8" class="empty">No workers running.</td></tr></tbody>
     </table>
   </div>
 
@@ -97,6 +117,23 @@
 const api = (path, opts) => fetch(path, opts).then(r => r.json());
 let enabledSet = new Set();
 
+function fmtBytes(n) {
+  n = Number(n) || 0;
+  const u = ['B','KB','MB','GB','TB','PB'];
+  let i = 0;
+  while (n >= 1000 && i < u.length - 1) { n /= 1000; i++; }
+  return (i === 0 ? n : n.toFixed(n < 10 ? 1 : 0)) + ' ' + u[i];
+}
+
+function updateBwNote() {
+  const mbps = Number(document.getElementById('bwLimit').value) || 0;
+  const note = document.getElementById('bwNote');
+  note.textContent = mbps > 0
+    ? `≈ ${fmtBytes(mbps * 1e6 * 86400)}/day`
+    : 'unlimited';
+}
+document.getElementById('bwLimit').addEventListener('input', updateBwNote);
+
 function renderStatus(s) {
   document.getElementById('downloaderPill').textContent = 'downloader: ' + (s.downloader || '—');
   const budget = Object.entries(s.budget || {}).map(([k,v]) => `${k}:${v}`).join('  ') || '—';
@@ -107,9 +144,14 @@ function renderStatus(s) {
     document.getElementById('maxItems').value = s.max_concurrent_items || '';
   document.getElementById('noDownloader').style.display = s.downloader ? 'none' : 'block';
 
+  const bwBytes = s.bandwidth_limit || 0;
+  if (document.activeElement.id !== 'bwLimit')
+    document.getElementById('bwLimit').value = bwBytes ? (bwBytes / 1e6) : '';
+  updateBwNote();
+
   const tb = document.getElementById('workers');
   const ws = s.workers || [];
-  tb.innerHTML = ws.length ? '' : '<tr><td colspan="7" class="empty">No workers running.</td></tr>';
+  tb.innerHTML = ws.length ? '' : '<tr><td colspan="8" class="empty">No workers running.</td></tr>';
   for (const w of ws) {
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${w.title || w.project}</td>
@@ -117,6 +159,7 @@ function renderStatus(s) {
       <td class="num">${w.concurrent_items}</td>
       <td class="num">${w.items_done}</td>
       <td class="num">${w.items_failed}</td>
+      <td class="num">${fmtBytes(w.bytes_uploaded || 0)}</td>
       <td class="meta">${w.last_error || ''}</td>
       <td><button class="ghost" data-restart="${w.project}">Restart</button></td>`;
     tb.appendChild(tr);
@@ -156,9 +199,53 @@ function renderProjects(p) {
        body: JSON.stringify({concurrent_items: Number(inp.value) || null})}).then(load));
 }
 
+function renderStats(st) {
+  const totals = st.totals || {items_done:0, items_failed:0, bytes:0};
+  document.getElementById('statDone').textContent = totals.items_done;
+  document.getElementById('statFailed').textContent = totals.items_failed;
+  document.getElementById('statBytes').textContent = fmtBytes(totals.bytes);
+  const hours = st.window_hours || 24;
+  const perDay = hours > 0 ? totals.bytes * (24 / hours) : 0;
+  document.getElementById('statRate').textContent = totals.bytes ? fmtBytes(perDay) : '—';
+  drawChart(st.buckets || []);
+}
+
+function drawChart(buckets) {
+  const svg = document.getElementById('chart');
+  const empty = document.getElementById('chartEmpty');
+  const max = Math.max(1, ...buckets.map(b => b.bytes));
+  const any = buckets.some(b => b.bytes || b.items_done || b.items_failed);
+  empty.style.display = any ? 'none' : 'block';
+  svg.style.display = any ? 'block' : 'none';
+  const W = svg.clientWidth || 900, H = 160, pad = 4, base = H - 16;
+  const bw = W / Math.max(1, buckets.length);
+  let bars = '';
+  buckets.forEach((b, i) => {
+    const h = Math.round((b.bytes / max) * (base - pad));
+    const title = new Date(b.t * 1000).toLocaleString() + ` — ${fmtBytes(b.bytes)}, `
+      + `${b.items_done} done` + (b.items_failed ? `, ${b.items_failed} failed` : '');
+    bars += `<rect class="bar" x="${(i*bw+1).toFixed(1)}" y="${base-h}" `
+      + `width="${Math.max(1,bw-2).toFixed(1)}" height="${h}" rx="1">`
+      + `<title>${title}</title></rect>`;
+  });
+  const first = buckets[0], last = buckets[buckets.length-1];
+  const tL = first ? new Date(first.t*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
+  const tR = last ? new Date(last.t*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
+  svg.innerHTML = `<line class="axis" x1="0" y1="${base}" x2="${W}" y2="${base}"/>`
+    + bars
+    + `<text x="2" y="${H-2}">${tL}</text>`
+    + `<text x="${W-2}" y="${H-2}" text-anchor="end">${tR}</text>`
+    + `<text x="2" y="12">${fmtBytes(max)}</text>`;
+}
+
+async function loadStats() {
+  try { renderStats(await api('/api/stats?hours=24&buckets=48')); } catch {}
+}
+
 async function load() {
   renderStatus(await api('/api/status'));
   renderProjects(await api('/api/projects'));
+  loadStats();
 }
 
 document.getElementById('saveSettings').onclick = async () => {
@@ -166,6 +253,7 @@ document.getElementById('saveSettings').onclick = async () => {
     body: JSON.stringify({
       downloader: document.getElementById('downloader').value,
       max_concurrent_items: Number(document.getElementById('maxItems').value) || 1,
+      bandwidth_limit: Math.round((Number(document.getElementById('bwLimit').value) || 0) * 1e6),
     })});
   load();
 };
@@ -187,6 +275,7 @@ function poll() {
   load(); setInterval(load, 3000);
 }
 load().then(connect);
+setInterval(loadStats, 15000);  // history refresh, independent of the live status feed
 </script>
 </body>
 </html>

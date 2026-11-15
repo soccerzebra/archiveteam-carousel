@@ -133,6 +133,26 @@ def test_per_project_concurrency_persists(tmp_path):
     assert row["concurrent_items"] == 5 and row["enabled"] is True
 
 
+def test_bandwidth_setting_persists(tmp_path):
+    client, cp = make_client(tmp_path)
+    with client:
+        r = client.post("/api/settings", json={"bandwidth_limit": 5_000_000})
+    assert r.status_code == 200
+    assert cp.config.global_config.bandwidth_limit == 5_000_000
+    assert r.json()["bandwidth_limit"] == 5_000_000
+
+
+def test_stats_endpoint_without_store(tmp_path):
+    # ControlPlane is built with stats=None here; the endpoint still returns a valid shape.
+    client, _ = make_client(tmp_path)
+    with client:
+        r = client.get("/api/stats?hours=24&buckets=12")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["totals"] == {"items_done": 0, "items_failed": 0, "bytes": 0}
+    assert "buckets" in body
+
+
 def test_index_served(tmp_path):
     client, _ = make_client(tmp_path)
     with client:

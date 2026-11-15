@@ -14,10 +14,12 @@ from .supervisor import Supervisor
 
 
 class ControlPlane:
-    def __init__(self, config: ConfigStore, supervisor: Supervisor, hq: Any | None = None):
+    def __init__(self, config: ConfigStore, supervisor: Supervisor, hq: Any | None = None,
+                 stats: Any | None = None):
         self.config = config
         self.supervisor = supervisor
         self.hq = hq
+        self.stats = stats
 
     async def heartbeat_once(self) -> None:
         """Register (first time), fetch the HQ catalog, then reconcile workers."""
@@ -44,9 +46,16 @@ class ControlPlane:
             "downloader": gc.downloader,
             "warrior_id": gc.warrior_id,
             "max_concurrent_items": gc.max_concurrent_items,
+            "bandwidth_limit": gc.bandwidth_limit,
             "budget": self.supervisor.budget(),
             "workers": [w.model_dump() for w in self.supervisor.snapshot()],
         }
+
+    def stats_series(self, hours: float = 24.0, buckets: int = 48) -> dict:
+        if self.stats is None:
+            return {"window_hours": hours, "bucket_seconds": 0, "buckets": [],
+                    "totals": {"items_done": 0, "items_failed": 0, "bytes": 0}}
+        return self.stats.series(hours=hours, buckets=buckets)
 
     def projects(self) -> dict:
         enabled = set(self.config.enabled_projects())
@@ -80,6 +89,8 @@ class ControlPlane:
             gc.max_concurrent_items = int(data["max_concurrent_items"])
         if "max_rsync_threads" in data:
             gc.max_rsync_threads = int(data["max_rsync_threads"])
+        if "bandwidth_limit" in data:
+            gc.bandwidth_limit = max(0, int(data["bandwidth_limit"] or 0))
         # per-project concurrency overrides, e.g. {"projects": {"urls": 3}}
         for name, ci in (data.get("projects") or {}).items():
             self.config.project(name).concurrent_items = int(ci) if ci else None
