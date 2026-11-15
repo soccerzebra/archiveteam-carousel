@@ -46,6 +46,7 @@ class ControlPlane:
             "downloader": gc.downloader,
             "warrior_id": gc.warrior_id,
             "max_concurrent_items": gc.max_concurrent_items,
+            "max_rsync_threads": gc.max_rsync_threads,
             "bandwidth_limit": gc.bandwidth_limit,
             "budget": self.supervisor.budget(),
             "workers": [w.model_dump() for w in self.supervisor.snapshot()],

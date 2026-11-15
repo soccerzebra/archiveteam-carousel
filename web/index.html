@@ -6,191 +6,400 @@
 <title>Carousel</title>
 <style>
   :root {
-    --bg:#f6f7f9; --panel:#fff; --border:#e2e5ea; --text:#1b1f24; --muted:#687079;
-    --accent:#2f6feb; --ok:#1a7f37; --warn:#9a6700; --bad:#cf222e; --chip:#eef1f5;
+    --bg:#f6f7f9; --panel:#fff; --panel2:#fbfcfd; --border:#e2e5ea; --text:#1b1f24;
+    --muted:#687079; --accent:#2f6feb; --accent-soft:#e8f0fe;
+    --ok:#1a7f37; --warn:#9a6700; --bad:#cf222e; --chip:#eef1f5; --sidebar:#141922;
+    --sidebar-text:#c6ccd4; --sidebar-muted:#7f8794; --sidebar-active:#1f2733;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg:#0d1117; --panel:#161b22; --border:#2b313a; --text:#e6edf3; --muted:#9198a1;
-      --accent:#4c8dff; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --chip:#20262e;
+      --bg:#0d1117; --panel:#161b22; --panel2:#12161d; --border:#2b313a; --text:#e6edf3;
+      --muted:#9198a1; --accent:#4c8dff; --accent-soft:#17233b;
+      --ok:#3fb950; --warn:#d29922; --bad:#f85149; --chip:#20262e; --sidebar:#0a0d12;
+      --sidebar-text:#c6ccd4; --sidebar-muted:#6e7681; --sidebar-active:#1a212b;
     }
   }
   * { box-sizing:border-box; }
+  html,body { height:100%; }
   body { margin:0; background:var(--bg); color:var(--text);
          font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
-  header { padding:16px; border-bottom:1px solid var(--border); background:var(--panel);
-           display:flex; flex-wrap:wrap; gap:12px 20px; align-items:center; }
-  h1 { font-size:18px; margin:0; font-weight:650; }
-  h1 .dot { color:var(--accent); }
+
+  .app { display:flex; min-height:100vh; }
+
+  /* ---- sidebar ---- */
+  .sidebar { width:224px; flex:0 0 224px; background:var(--sidebar); color:var(--sidebar-text);
+             display:flex; flex-direction:column; position:sticky; top:0; height:100vh; }
+  .brand { display:flex; align-items:center; gap:9px; font-size:17px; font-weight:650;
+           color:#fff; padding:18px 18px 16px; }
+  .brand .dot { color:var(--accent); font-size:13px; }
+  nav { display:flex; flex-direction:column; padding:6px; gap:2px; }
+  nav a { display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:8px;
+          color:var(--sidebar-text); text-decoration:none; font-weight:500; cursor:pointer; }
+  nav a:hover { background:var(--sidebar-active); }
+  nav a.active { background:var(--accent); color:#fff; }
+  nav a svg { width:17px; height:17px; stroke:currentColor; fill:none; stroke-width:1.8;
+              stroke-linecap:round; stroke-linejoin:round; opacity:.95; }
+  nav a .badge { margin-left:auto; background:rgba(255,255,255,.14); color:#fff;
+                 border-radius:999px; font-size:11px; padding:1px 8px; font-variant-numeric:tabular-nums; }
+  nav a.active .badge { background:rgba(255,255,255,.25); }
+  .sidebar-foot { margin-top:auto; padding:14px 16px; border-top:1px solid rgba(255,255,255,.08);
+                  font-size:12px; color:var(--sidebar-muted); display:flex; flex-direction:column; gap:6px; }
+  .conn { display:inline-flex; align-items:center; gap:7px; }
+  .conn .led { width:8px; height:8px; border-radius:50%; background:var(--sidebar-muted); }
+  .conn.live .led { background:var(--ok); box-shadow:0 0 0 3px rgba(63,185,80,.18); }
+  .conn.off .led { background:var(--bad); }
+
+  /* ---- content ---- */
+  .content { flex:1; min-width:0; display:flex; flex-direction:column; }
+  .topbar { display:flex; align-items:center; gap:14px; padding:16px 24px;
+            border-bottom:1px solid var(--border); background:var(--panel); position:sticky;
+            top:0; z-index:5; }
+  .topbar h1 { font-size:18px; margin:0; font-weight:650; }
   .grow { flex:1; }
-  .pill { background:var(--chip); border-radius:999px; padding:3px 10px; font-size:12px;
-          color:var(--muted); }
-  main { max-width:1000px; margin:0 auto; padding:16px; display:grid; gap:16px; }
+  .menu-btn { display:none; background:var(--chip); color:var(--text); border:0;
+              border-radius:8px; padding:7px 11px; font-size:16px; cursor:pointer; }
+  .pill { background:var(--chip); border-radius:999px; padding:4px 11px; font-size:12px;
+          color:var(--muted); white-space:nowrap; }
+  .pill b { color:var(--text); font-weight:600; }
+
+  main.pages { padding:24px; max-width:1040px; width:100%; }
+  .view { display:none; animation:fade .18s ease; }
+  .view.active { display:block; }
+  @keyframes fade { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+
   .card { background:var(--panel); border:1px solid var(--border); border-radius:12px;
-          padding:16px; }
-  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em;
-             color:var(--muted); margin:0 0 12px; }
+          padding:18px; margin-bottom:16px; }
+  .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.05em;
+             color:var(--muted); margin:0 0 14px; font-weight:600; }
+  .card .sub { color:var(--muted); font-size:13px; margin:-8px 0 14px; }
+
+  /* stat tiles */
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px;
+           margin-bottom:16px; }
+  .tile { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:14px 16px; }
+  .tile .v { font-size:24px; font-weight:650; font-variant-numeric:tabular-nums; }
+  .tile .k { color:var(--muted); font-size:12px; margin-top:2px; }
+
   table { width:100%; border-collapse:collapse; }
-  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); }
+  th,td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--border); }
   th { font-size:12px; color:var(--muted); font-weight:600; }
-  td.num { font-variant-numeric:tabular-nums; }
-  .state { font-size:12px; font-weight:600; padding:2px 8px; border-radius:6px;
-           background:var(--chip); }
-  .state.running { color:var(--ok); } .state.failed { color:var(--bad); }
-  .state.starting,.state.stopping { color:var(--warn); } .state.stopped { color:var(--muted); }
-  .proj { display:flex; align-items:center; gap:10px; padding:8px 0;
+  td.num,th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  tbody tr:last-child td { border-bottom:0; }
+  .state { font-size:12px; font-weight:600; padding:2px 9px; border-radius:6px; background:var(--chip);
+           text-transform:capitalize; }
+  .state.running { color:var(--ok); background:rgba(26,127,55,.12); }
+  .state.failed { color:var(--bad); background:rgba(207,34,46,.12); }
+  .state.starting,.state.stopping { color:var(--warn); background:rgba(154,103,0,.12); }
+  .state.stopped { color:var(--muted); }
+
+  /* threads dots */
+  .threads { display:inline-flex; gap:4px; align-items:center; }
+  .threads i { width:9px; height:9px; border-radius:2px; background:var(--accent);
+               display:inline-block; }
+  .threads.run i { animation:pulse 1.4s ease-in-out infinite; }
+  .threads i:nth-child(2){ animation-delay:.2s } .threads i:nth-child(3){ animation-delay:.4s }
+  .threads i:nth-child(4){ animation-delay:.6s } .threads i:nth-child(5){ animation-delay:.8s }
+  @keyframes pulse { 0%,100%{ opacity:.35 } 50%{ opacity:1 } }
+
+  /* project rows */
+  .proj { display:flex; align-items:center; gap:14px; padding:12px 2px;
           border-bottom:1px solid var(--border); }
   .proj:last-child { border-bottom:0; }
-  .proj .title { font-weight:550; } .proj .meta { color:var(--muted); font-size:12px; }
-  input,button { font:inherit; color:var(--text); }
+  .proj .title { font-weight:550; }
+  .proj .meta { color:var(--muted); font-size:12px; }
+  .proj .src { font-size:11px; color:var(--muted); border:1px solid var(--border);
+               border-radius:6px; padding:1px 7px; margin-left:8px; }
+
+  /* switch */
+  .switch { position:relative; width:40px; height:23px; flex:0 0 auto; }
+  .switch input { opacity:0; width:0; height:0; }
+  .switch .slider { position:absolute; inset:0; background:var(--chip); border:1px solid var(--border);
+                    border-radius:999px; transition:.18s; cursor:pointer; }
+  .switch .slider::before { content:""; position:absolute; width:17px; height:17px; left:2px; top:2px;
+                    background:#fff; border-radius:50%; transition:.18s; box-shadow:0 1px 2px rgba(0,0,0,.3); }
+  .switch input:checked + .slider { background:var(--accent); border-color:var(--accent); }
+  .switch input:checked + .slider::before { transform:translateX(17px); }
+
   input[type=text],input[type=number] { background:var(--bg); border:1px solid var(--border);
-          border-radius:8px; padding:6px 10px; }
-  button { background:var(--accent); color:#fff; border:0; border-radius:8px;
-           padding:6px 14px; cursor:pointer; font-weight:550; }
+          border-radius:8px; padding:8px 11px; color:var(--text); font:inherit; }
+  input:focus { outline:2px solid var(--accent-soft); border-color:var(--accent); }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 16px;
+           cursor:pointer; font:inherit; font-weight:550; }
+  button:hover { filter:brightness(1.06); }
   button.ghost { background:var(--chip); color:var(--text); }
   button.danger { background:var(--bad); }
-  .switch { margin-left:auto; }
-  .empty { color:var(--muted); padding:8px 0; }
-  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-  label { color:var(--muted); font-size:12px; }
-  .stat { font-size:22px; font-weight:650; font-variant-numeric:tabular-nums; }
+  button.seg { background:var(--chip); color:var(--muted); padding:6px 12px; font-weight:500; }
+  button.seg.on { background:var(--accent); color:#fff; }
+
+  .field { display:flex; flex-direction:column; gap:6px; margin-bottom:16px; max-width:360px; }
+  .field label { font-size:12px; color:var(--muted); font-weight:600; }
+  .field .hint { font-size:12px; color:var(--muted); }
+  .field .inline { display:flex; align-items:center; gap:8px; }
+  .actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:4px; }
+  .empty { color:var(--muted); padding:14px 2px; }
+  .banner { background:var(--accent-soft); border:1px solid var(--accent); color:var(--text);
+            border-radius:10px; padding:12px 14px; margin-bottom:16px; font-size:13px; }
+
   #chart .bar { fill:var(--accent); }
   #chart .axis { stroke:var(--border); }
   #chart text { fill:var(--muted); font-size:10px; }
+
+  .scrim { display:none; }
+  @media (max-width:760px) {
+    .sidebar { position:fixed; z-index:20; transform:translateX(-100%); transition:.2s; }
+    .app.nav-open .sidebar { transform:none; }
+    .menu-btn { display:inline-block; }
+    .scrim { display:block; position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:15; }
+    .app:not(.nav-open) .scrim { display:none; }
+    main.pages { padding:16px; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1><span class="dot">●</span> Carousel</h1>
-  <span class="pill" id="downloaderPill">downloader: —</span>
-  <span class="pill" id="budgetPill">budget: —</span>
-  <span class="grow"></span>
-  <span class="pill" id="conn">connecting…</span>
-</header>
-
-<main>
-  <div class="card">
-    <h2>Settings</h2>
-    <div class="row">
-      <label>Downloader <input type="text" id="downloader" placeholder="your handle"></label>
-      <label>Max concurrent items <input type="number" id="maxItems" min="1" style="width:80px"></label>
-      <label>Bandwidth limit
-        <input type="number" id="bwLimit" min="0" step="0.1" style="width:80px"> MB/s
-        <span class="meta" id="bwNote"></span></label>
-      <button id="saveSettings">Save</button>
-      <button class="ghost" id="refresh">Refresh catalog</button>
-      <button class="danger" id="stopAll">Stop all</button>
+<div class="app" id="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><span class="dot">●</span> Carousel</div>
+    <nav id="nav">
+      <a data-view="dashboard" class="active">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+        Dashboard</a>
+      <a data-view="projects">
+        <svg viewBox="0 0 24 24"><path d="M3 7h18M3 12h18M3 17h18"/></svg>
+        Projects <span class="badge" id="navProjBadge">0</span></a>
+      <a data-view="stats">
+        <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 15l3-4 3 2 4-6"/></svg>
+        Stats</a>
+      <a data-view="settings">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.17V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15H4a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 6 9.4l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 11 4.6V4a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 2.82 1.17l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Settings</a>
+    </nav>
+    <div class="sidebar-foot">
+      <span class="conn" id="conn"><span class="led"></span><span id="connText">connecting…</span></span>
+      <span id="warriorMeta">warrior: —</span>
     </div>
-    <p class="empty" id="noDownloader" style="display:none">
-      Set a downloader handle to start archiving — nothing runs without one.</p>
-  </div>
+  </aside>
+  <div class="scrim" id="scrim"></div>
 
-  <div class="card">
-    <h2>Activity (last 24h)</h2>
-    <div class="row" id="statTiles" style="gap:24px;margin-bottom:14px">
-      <div><div class="stat" id="statDone">0</div><div class="meta">items archived</div></div>
-      <div><div class="stat" id="statBytes">0 B</div><div class="meta">data archived</div></div>
-      <div><div class="stat" id="statFailed">0</div><div class="meta">items failed</div></div>
-      <div><div class="stat" id="statRate">—</div><div class="meta">avg/day (extrapolated)</div></div>
-    </div>
-    <svg id="chart" width="100%" height="160" role="img" aria-label="Data archived over time"></svg>
-    <div class="meta" id="chartEmpty" style="display:none">No activity recorded yet.</div>
-  </div>
+  <div class="content">
+    <header class="topbar">
+      <button class="menu-btn" id="menuBtn">☰</button>
+      <h1 id="viewTitle">Dashboard</h1>
+      <span class="grow"></span>
+      <span class="pill" id="dlPill">downloader: —</span>
+      <span class="pill" id="bwPill" style="display:none"></span>
+    </header>
 
-  <div class="card">
-    <h2>Running projects</h2>
-    <table>
-      <thead><tr><th>Project</th><th>State</th><th class="num">Concurrency</th>
-        <th class="num">Done</th><th class="num">Failed</th><th class="num">Archived</th>
-        <th>Note</th><th></th></tr></thead>
-      <tbody id="workers"><tr><td colspan="8" class="empty">No workers running.</td></tr></tbody>
-    </table>
-  </div>
+    <main class="pages">
+      <!-- DASHBOARD -->
+      <section id="view-dashboard" class="view active">
+        <div class="banner" id="noDownloaderBanner" style="display:none">
+          No downloader handle set — nothing will run. Add one under
+          <a href="#settings">Settings</a> to start archiving.</div>
+        <div class="tiles">
+          <div class="tile"><div class="v" id="tActive">0</div><div class="k">active projects</div></div>
+          <div class="tile"><div class="v" id="tThreads">0</div><div class="k">running threads</div></div>
+          <div class="tile"><div class="v" id="tDone">0</div><div class="k">items done (24h)</div></div>
+          <div class="tile"><div class="v" id="tBytes">0 B</div><div class="k">archived (24h)</div></div>
+        </div>
+        <div class="card">
+          <h2>Live workers</h2>
+          <table>
+            <thead><tr><th>Project</th><th>State</th><th>Threads</th>
+              <th class="num">Done</th><th class="num">Failed</th><th class="num">Archived</th>
+              <th>Note</th><th></th></tr></thead>
+            <tbody id="workers"><tr><td colspan="8" class="empty">No workers running.</td></tr></tbody>
+          </table>
+        </div>
+      </section>
 
-  <div class="card">
-    <h2>Available projects</h2>
-    <div id="projects"><p class="empty">Loading catalog…</p></div>
+      <!-- PROJECTS -->
+      <section id="view-projects" class="view">
+        <div class="card">
+          <h2>Projects</h2>
+          <p class="sub">Toggle which projects this warrior runs. Enabled projects share the
+            global concurrency budget; set a per-project override on the right.</p>
+          <div class="actions" style="margin-bottom:10px">
+            <input type="text" id="projFilter" placeholder="Filter projects…" style="max-width:240px">
+            <span class="grow"></span>
+            <button class="ghost" id="refresh">Refresh catalog</button>
+          </div>
+          <div id="projects"><p class="empty">Loading catalog…</p></div>
+        </div>
+      </section>
+
+      <!-- STATS -->
+      <section id="view-stats" class="view">
+        <div class="card">
+          <h2>Activity</h2>
+          <div class="actions" style="margin-bottom:14px">
+            <button class="seg on" data-hours="6">6h</button>
+            <button class="seg" data-hours="24">24h</button>
+            <button class="seg" data-hours="168">7d</button>
+          </div>
+          <div class="tiles" style="margin-bottom:16px">
+            <div class="tile"><div class="v" id="sDone">0</div><div class="k">items archived</div></div>
+            <div class="tile"><div class="v" id="sBytes">0 B</div><div class="k">data archived</div></div>
+            <div class="tile"><div class="v" id="sFailed">0</div><div class="k">items failed</div></div>
+            <div class="tile"><div class="v" id="sRate">—</div><div class="k">per day (extrapolated)</div></div>
+          </div>
+          <svg id="chart" width="100%" height="180" role="img" aria-label="Data archived over time"></svg>
+          <div class="empty" id="chartEmpty" style="display:none">No activity recorded in this window yet.</div>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section id="view-settings" class="view">
+        <div class="card">
+          <h2>Identity</h2>
+          <div class="field">
+            <label for="downloader">Downloader handle</label>
+            <input type="text" id="downloader" placeholder="your handle">
+            <span class="hint">Your single name on the ArchiveTeam leaderboards. Nothing runs until this is set.</span>
+          </div>
+          <div class="field">
+            <label>Warrior ID (assigned by HQ)</label>
+            <input type="text" id="warriorId" disabled>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Resources</h2>
+          <div class="field">
+            <label for="maxItems">Max concurrent items (global budget)</label>
+            <input type="number" id="maxItems" min="1" style="max-width:120px">
+            <span class="hint">Divided across all enabled projects.</span>
+          </div>
+          <div class="field">
+            <label for="bwLimit">Bandwidth limit</label>
+            <div class="inline">
+              <input type="number" id="bwLimit" min="0" step="0.1" style="width:110px"> MB/s
+              <span class="hint" id="bwNote"></span>
+            </div>
+            <span class="hint">Global download cap, split across active downloads. 0 = unlimited.</span>
+          </div>
+          <div class="field">
+            <label for="rsyncThreads">Max rsync upload threads</label>
+            <input type="number" id="rsyncThreads" min="1" style="max-width:120px">
+          </div>
+          <div class="actions">
+            <button id="saveSettings">Save settings</button>
+            <button class="danger" id="stopAll">Stop all workers</button>
+          </div>
+        </div>
+      </section>
+    </main>
   </div>
-</main>
+</div>
 
 <script>
 const api = (path, opts) => fetch(path, opts).then(r => r.json());
-let enabledSet = new Set();
+let lastStatus = {}, statsHours = 6;
 
 function fmtBytes(n) {
   n = Number(n) || 0;
-  const u = ['B','KB','MB','GB','TB','PB'];
-  let i = 0;
+  const u = ['B','KB','MB','GB','TB','PB']; let i = 0;
   while (n >= 1000 && i < u.length - 1) { n /= 1000; i++; }
   return (i === 0 ? n : n.toFixed(n < 10 ? 1 : 0)) + ' ' + u[i];
 }
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-function updateBwNote() {
-  const mbps = Number(document.getElementById('bwLimit').value) || 0;
-  const note = document.getElementById('bwNote');
-  note.textContent = mbps > 0
-    ? `≈ ${fmtBytes(mbps * 1e6 * 86400)}/day`
-    : 'unlimited';
+/* ---- routing ---- */
+const titles = {dashboard:'Dashboard', projects:'Projects', stats:'Stats', settings:'Settings'};
+function route() {
+  const view = (location.hash.replace('#','') || 'dashboard');
+  const name = titles[view] ? view : 'dashboard';
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+  document.querySelectorAll('#nav a').forEach(a =>
+    a.classList.toggle('active', a.dataset.view === name));
+  document.getElementById('viewTitle').textContent = titles[name];
+  document.getElementById('app').classList.remove('nav-open');
+  if (name === 'stats') loadStats();
 }
-document.getElementById('bwLimit').addEventListener('input', updateBwNote);
+window.addEventListener('hashchange', route);
+document.getElementById('menuBtn').onclick = () =>
+  document.getElementById('app').classList.toggle('nav-open');
+document.getElementById('scrim').onclick = () =>
+  document.getElementById('app').classList.remove('nav-open');
 
+/* ---- status + dashboard ---- */
 function renderStatus(s) {
-  document.getElementById('downloaderPill').textContent = 'downloader: ' + (s.downloader || '—');
-  const budget = Object.entries(s.budget || {}).map(([k,v]) => `${k}:${v}`).join('  ') || '—';
-  document.getElementById('budgetPill').textContent = 'budget: ' + budget;
-  if (document.activeElement.id !== 'downloader')
-    document.getElementById('downloader').value = s.downloader || '';
-  if (document.activeElement.id !== 'maxItems')
-    document.getElementById('maxItems').value = s.max_concurrent_items || '';
-  document.getElementById('noDownloader').style.display = s.downloader ? 'none' : 'block';
+  lastStatus = s;
+  document.getElementById('dlPill').innerHTML = 'downloader: <b>' + (esc(s.downloader) || '—') + '</b>';
+  document.getElementById('warriorMeta').textContent = 'warrior: ' + (s.warrior_id || '—');
+  const bw = s.bandwidth_limit || 0;
+  const bwPill = document.getElementById('bwPill');
+  bwPill.style.display = bw ? 'inline-block' : 'none';
+  if (bw) bwPill.innerHTML = 'limit: <b>' + fmtBytes(bw) + '/s</b>';
 
-  const bwBytes = s.bandwidth_limit || 0;
+  document.getElementById('noDownloaderBanner').style.display = s.downloader ? 'none' : 'block';
+
+  // settings fields (don't clobber while editing)
+  const set = (id, val) => { const e = document.getElementById(id);
+    if (document.activeElement !== e) e.value = val; };
+  set('downloader', s.downloader || '');
+  set('maxItems', s.max_concurrent_items || '');
+  set('rsyncThreads', s.max_rsync_threads || '');
+  set('warriorId', s.warrior_id || '');
   if (document.activeElement.id !== 'bwLimit')
-    document.getElementById('bwLimit').value = bwBytes ? (bwBytes / 1e6) : '';
+    document.getElementById('bwLimit').value = bw ? (bw / 1e6) : '';
   updateBwNote();
 
-  const tb = document.getElementById('workers');
   const ws = s.workers || [];
+  document.getElementById('tActive').textContent = ws.filter(w => w.state === 'running').length;
+  document.getElementById('tThreads').textContent =
+    ws.filter(w => w.state === 'running').reduce((a, w) => a + (w.concurrent_items || 0), 0);
+
+  const tb = document.getElementById('workers');
   tb.innerHTML = ws.length ? '' : '<tr><td colspan="8" class="empty">No workers running.</td></tr>';
   for (const w of ws) {
+    const n = Math.min(w.concurrent_items || 0, 8);
+    const dots = '<span class="threads ' + (w.state === 'running' ? 'run' : '') + '">'
+      + '<i></i>'.repeat(Math.max(1, n)) + '</span> ' + (w.concurrent_items || 0);
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${w.title || w.project}</td>
+    tr.innerHTML = `<td><b>${esc(w.title || w.project)}</b></td>
       <td><span class="state ${w.state}">${w.state}</span></td>
-      <td class="num">${w.concurrent_items}</td>
+      <td>${dots}</td>
       <td class="num">${w.items_done}</td>
       <td class="num">${w.items_failed}</td>
       <td class="num">${fmtBytes(w.bytes_uploaded || 0)}</td>
-      <td class="meta">${w.last_error || ''}</td>
-      <td><button class="ghost" data-restart="${w.project}">Restart</button></td>`;
+      <td class="meta">${esc(w.last_error || '')}</td>
+      <td><button class="ghost" data-restart="${esc(w.project)}">Restart</button></td>`;
     tb.appendChild(tr);
   }
   tb.querySelectorAll('button[data-restart]').forEach(b => b.onclick = () =>
     fetch(`/api/projects/${b.dataset.restart}/restart`, {method:'POST'}).then(load));
 }
 
+/* ---- projects ---- */
+let enabledSet = new Set();
 function renderProjects(p) {
   enabledSet = new Set(p.enabled || []);
+  document.getElementById('navProjBadge').textContent = enabledSet.size;
+  const filter = document.getElementById('projFilter').value.toLowerCase();
   const box = document.getElementById('projects');
-  const list = p.projects || [];
-  box.innerHTML = list.length ? '' : '<p class="empty">No projects in the catalog yet.</p>';
+  const list = (p.projects || []).filter(pr =>
+    (pr.name + ' ' + (pr.title || '')).toLowerCase().includes(filter));
+  box.innerHTML = list.length ? '' : '<p class="empty">No matching projects.</p>';
   for (const proj of list) {
     const on = enabledSet.has(proj.name);
     const div = document.createElement('div');
     div.className = 'proj';
-    const conc = on
-      ? `<label style="margin-left:auto">items <input type="number" min="1" style="width:64px"
-            value="${proj.concurrent_items || ''}" placeholder="auto" data-conc="${proj.name}"></label>`
-      : '<span class="switch"></span>';
-    div.innerHTML = `<div><div class="title">${proj.title || proj.name}</div>
-      <div class="meta">${proj.name} · ${proj.source}</div></div>
-      ${conc}
-      <button class="${on ? 'danger' : ''}" data-name="${proj.name}" data-on="${on}">
-        ${on ? 'Disable' : 'Enable'}</button>`;
+    div.innerHTML = `
+      <label class="switch"><input type="checkbox" ${on?'checked':''} data-name="${esc(proj.name)}">
+        <span class="slider"></span></label>
+      <div style="flex:1;min-width:0">
+        <div class="title">${esc(proj.title || proj.name)}<span class="src">${esc(proj.source)}</span></div>
+        <div class="meta">${esc(proj.name)}</div>
+      </div>
+      ${on ? `<label class="meta">threads
+        <input type="number" min="1" style="width:66px" value="${proj.concurrent_items || ''}"
+          placeholder="auto" data-conc="${esc(proj.name)}"></label>` : ''}`;
     box.appendChild(div);
   }
-  box.querySelectorAll('button[data-name]').forEach(b => b.onclick = async () => {
-    const name = b.dataset.name, on = b.dataset.on === 'true';
-    await fetch(`/api/projects/${name}/${on ? 'disable' : 'enable'}`, {method:'POST'});
+  box.querySelectorAll('input[data-name]').forEach(cb => cb.onchange = async () => {
+    const name = cb.dataset.name;
+    await fetch(`/api/projects/${name}/${cb.checked ? 'enable' : 'disable'}`, {method:'POST'});
     load();
   });
   box.querySelectorAll('input[data-conc]').forEach(inp => inp.onchange = () =>
@@ -198,26 +407,57 @@ function renderProjects(p) {
       {method:'POST', headers:{'Content-Type':'application/json'},
        body: JSON.stringify({concurrent_items: Number(inp.value) || null})}).then(load));
 }
+document.getElementById('projFilter').oninput = () => api('/api/projects').then(renderProjects);
+document.getElementById('refresh').onclick = () =>
+  fetch('/api/refresh', {method:'POST'}).then(load);
 
+/* ---- settings ---- */
+function updateBwNote() {
+  const mbps = Number(document.getElementById('bwLimit').value) || 0;
+  document.getElementById('bwNote').textContent =
+    mbps > 0 ? `≈ ${fmtBytes(mbps * 1e6 * 86400)}/day` : 'unlimited';
+}
+document.getElementById('bwLimit').addEventListener('input', updateBwNote);
+document.getElementById('saveSettings').onclick = async () => {
+  await api('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      downloader: document.getElementById('downloader').value,
+      max_concurrent_items: Number(document.getElementById('maxItems').value) || 1,
+      max_rsync_threads: Number(document.getElementById('rsyncThreads').value) || 1,
+      bandwidth_limit: Math.round((Number(document.getElementById('bwLimit').value) || 0) * 1e6),
+    })});
+  load();
+};
+document.getElementById('stopAll').onclick = () => {
+  if (confirm('Stop all running workers?')) fetch('/api/stop', {method:'POST'}).then(load);
+};
+
+/* ---- stats ---- */
+document.querySelectorAll('button[data-hours]').forEach(b => b.onclick = () => {
+  statsHours = Number(b.dataset.hours);
+  document.querySelectorAll('button[data-hours]').forEach(x => x.classList.toggle('on', x === b));
+  loadStats();
+});
 function renderStats(st) {
-  const totals = st.totals || {items_done:0, items_failed:0, bytes:0};
-  document.getElementById('statDone').textContent = totals.items_done;
-  document.getElementById('statFailed').textContent = totals.items_failed;
-  document.getElementById('statBytes').textContent = fmtBytes(totals.bytes);
-  const hours = st.window_hours || 24;
-  const perDay = hours > 0 ? totals.bytes * (24 / hours) : 0;
-  document.getElementById('statRate').textContent = totals.bytes ? fmtBytes(perDay) : '—';
+  const t = st.totals || {items_done:0, items_failed:0, bytes:0};
+  document.getElementById('sDone').textContent = t.items_done;
+  document.getElementById('sFailed').textContent = t.items_failed;
+  document.getElementById('sBytes').textContent = fmtBytes(t.bytes);
+  const hours = st.window_hours || statsHours;
+  document.getElementById('sRate').textContent =
+    t.bytes ? fmtBytes(t.bytes * (24 / hours)) : '—';
+  // dashboard 24h tiles come from a fixed 24h pull
   drawChart(st.buckets || []);
 }
-
 function drawChart(buckets) {
   const svg = document.getElementById('chart');
   const empty = document.getElementById('chartEmpty');
-  const max = Math.max(1, ...buckets.map(b => b.bytes));
   const any = buckets.some(b => b.bytes || b.items_done || b.items_failed);
   empty.style.display = any ? 'none' : 'block';
   svg.style.display = any ? 'block' : 'none';
-  const W = svg.clientWidth || 900, H = 160, pad = 4, base = H - 16;
+  if (!any) { svg.innerHTML = ''; return; }
+  const max = Math.max(1, ...buckets.map(b => b.bytes));
+  const W = svg.clientWidth || 900, H = 180, pad = 4, base = H - 16;
   const bw = W / Math.max(1, buckets.length);
   let bars = '';
   buckets.forEach((b, i) => {
@@ -225,57 +465,47 @@ function drawChart(buckets) {
     const title = new Date(b.t * 1000).toLocaleString() + ` — ${fmtBytes(b.bytes)}, `
       + `${b.items_done} done` + (b.items_failed ? `, ${b.items_failed} failed` : '');
     bars += `<rect class="bar" x="${(i*bw+1).toFixed(1)}" y="${base-h}" `
-      + `width="${Math.max(1,bw-2).toFixed(1)}" height="${h}" rx="1">`
-      + `<title>${title}</title></rect>`;
+      + `width="${Math.max(1,bw-2).toFixed(1)}" height="${h}" rx="1"><title>${esc(title)}</title></rect>`;
   });
+  const fmtT = t => new Date(t*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
   const first = buckets[0], last = buckets[buckets.length-1];
-  const tL = first ? new Date(first.t*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
-  const tR = last ? new Date(last.t*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
-  svg.innerHTML = `<line class="axis" x1="0" y1="${base}" x2="${W}" y2="${base}"/>`
-    + bars
-    + `<text x="2" y="${H-2}">${tL}</text>`
-    + `<text x="${W-2}" y="${H-2}" text-anchor="end">${tR}</text>`
+  svg.innerHTML = `<line class="axis" x1="0" y1="${base}" x2="${W}" y2="${base}"/>` + bars
+    + `<text x="2" y="${H-2}">${first?fmtT(first.t):''}</text>`
+    + `<text x="${W-2}" y="${H-2}" text-anchor="end">${last?fmtT(last.t):''}</text>`
     + `<text x="2" y="12">${fmtBytes(max)}</text>`;
 }
-
 async function loadStats() {
-  try { renderStats(await api('/api/stats?hours=24&buckets=48')); } catch {}
+  try {
+    renderStats(await api(`/api/stats?hours=${statsHours}&buckets=48`));
+    const day = await api('/api/stats?hours=24&buckets=24');  // dashboard tiles
+    document.getElementById('tDone').textContent = day.totals.items_done;
+    document.getElementById('tBytes').textContent = fmtBytes(day.totals.bytes);
+  } catch {}
 }
 
+/* ---- load + live ---- */
 async function load() {
-  renderStatus(await api('/api/status'));
-  renderProjects(await api('/api/projects'));
+  const [s, p] = await Promise.all([api('/api/status'), api('/api/projects')]);
+  renderStatus(s); renderProjects(p);
   loadStats();
 }
-
-document.getElementById('saveSettings').onclick = async () => {
-  await api('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({
-      downloader: document.getElementById('downloader').value,
-      max_concurrent_items: Number(document.getElementById('maxItems').value) || 1,
-      bandwidth_limit: Math.round((Number(document.getElementById('bwLimit').value) || 0) * 1e6),
-    })});
-  load();
-};
-document.getElementById('refresh').onclick = () => fetch('/api/refresh', {method:'POST'}).then(load);
-document.getElementById('stopAll').onclick = () => fetch('/api/stop', {method:'POST'}).then(load);
-
-// Live updates over WebSocket, with polling fallback.
 function connect() {
-  const conn = document.getElementById('conn');
+  const conn = document.getElementById('conn'), txt = document.getElementById('connText');
   let ws;
   try { ws = new WebSocket(`ws://${location.host}/ws`); } catch { return poll(); }
-  ws.onopen = () => conn.textContent = 'live';
+  ws.onopen = () => { conn.className = 'conn live'; txt.textContent = 'live'; };
   ws.onmessage = (e) => { const d = JSON.parse(e.data); renderStatus(d.status); renderProjects(d.projects); };
-  ws.onclose = () => { conn.textContent = 'reconnecting…'; setTimeout(connect, 2000); };
+  ws.onclose = () => { conn.className = 'conn off'; txt.textContent = 'reconnecting…'; setTimeout(connect, 2000); };
   ws.onerror = () => ws.close();
 }
 function poll() {
-  document.getElementById('conn').textContent = 'polling';
+  document.getElementById('conn').className = 'conn';
+  document.getElementById('connText').textContent = 'polling';
   load(); setInterval(load, 3000);
 }
+route();
 load().then(connect);
-setInterval(loadStats, 15000);  // history refresh, independent of the live status feed
+setInterval(loadStats, 15000);
 </script>
 </body>
 </html>
