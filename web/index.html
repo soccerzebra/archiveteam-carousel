@@ -286,10 +286,6 @@
             <input type="text" id="downloader" placeholder="your handle">
             <span class="hint">Your single name on the ArchiveTeam leaderboards. Nothing runs until this is set.</span>
           </div>
-          <div class="field">
-            <label>Warrior ID (assigned by HQ)</label>
-            <input type="text" id="warriorId" disabled>
-          </div>
         </div>
         <div class="card">
           <h2>Resources</h2>
@@ -422,7 +418,6 @@ function renderStatus(s) {
   set('downloader', s.downloader || '');
   set('maxItems', s.max_concurrent_items || '');
   set('rsyncThreads', s.max_rsync_threads || '');
-  set('warriorId', s.warrior_id || '');
   set('httpUser', s.http_username || '');
   if (document.activeElement.id !== 'bwLimit')
     document.getElementById('bwLimit').value = bw ? (bw / 1e6) : '';
