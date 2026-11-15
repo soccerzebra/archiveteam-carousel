@@ -91,6 +91,20 @@ def test_apply_status_line_progression():
     assert s.state is WorkerState.STOPPED and s.items_done == 6
 
 
+def test_apply_status_line_threads_populates_active_items():
+    s = WorkerStatus(project="urls")
+    apply_status_line(s, '{"event":"threads","threads":['
+                         '{"slot":0,"item_id":"a1","item_name":"job A","task":"WgetDownload",'
+                         '"started":123.0,"bytes_up":500},'
+                         '{"slot":1,"item_id":"b2","item_name":"job B","task":"RsyncUpload"}]}')
+    assert [t.slot for t in s.active_items] == [0, 1]
+    assert s.active_items[0].task == "WgetDownload" and s.active_items[0].bytes_up == 500
+    assert s.active_items[1].item_name == "job B"
+    # a stop clears the live threads
+    apply_status_line(s, '{"event":"stopped","completed":2,"failed":0}')
+    assert s.active_items == []
+
+
 def test_apply_status_line_returns_event():
     s = WorkerStatus(project="urls")
     event = apply_status_line(s, '{"event":"item_end","completed":1,"failed":0,"bytes":42}')

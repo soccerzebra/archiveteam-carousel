@@ -66,10 +66,17 @@ class Item(dict):
         self.item_id = item_id or uuid.uuid4().hex[:8]
         self.state = self.RUNNING
         self.canceled = False
+        self.last_error: str | None = None
         self.log: list[str] = []
+
+    #: Cap the retained log so a long-running task (e.g. a scraper that streams output for
+    #: hours) can't grow this list without bound. We keep the most recent lines.
+    LOG_CAP = 2000
 
     def log_output(self, message: Any) -> None:
         self.log.append(str(message))
+        if len(self.log) > self.LOG_CAP:
+            del self.log[:-self.LOG_CAP]
 
     def description(self) -> str:
         return self.get("item_name") or f"Item {self.item_id}"

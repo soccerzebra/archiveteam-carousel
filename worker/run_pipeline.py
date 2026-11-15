@@ -70,6 +70,10 @@ def load_pipeline(pipeline_path: str, downloader: str, extra_context: dict | Non
         "__name__": "__pipeline__",
         "__file__": str(path),
         "downloader": downloader,
+        # Submodules are fetched by the installer at clone time, so pipelines that would
+        # otherwise run a runtime `git submodule update` (e.g. urlteam2) should skip it —
+        # that in-container git update fails and isn't needed.
+        "no_submodule": True,
     }
     if extra_context:
         namespace.update(extra_context)
@@ -99,10 +103,17 @@ def run_install_hook(project_dir: str) -> None:
 
 
 async def run(args: argparse.Namespace) -> int:
-    run_install_hook(str(Path(args.pipeline).resolve().parent))
+    project_dir = Path(args.pipeline).resolve().parent
+    run_install_hook(str(project_dir))
     apply_bandwidth_limit(args.project, args.data_dir, args.limit_rate)
 
     project, pipeline = load_pipeline(args.pipeline, args.downloader)
+
+    # Run with the project directory as the working directory. Projects that shell out to a
+    # relative script (e.g. urlteam2's scraper.py with PYTHONPATH=terroroftinytown) and those
+    # reading project-dir assets rely on this; wget projects use absolute item_dir paths, so
+    # it's harmless for them. One worker hosts one project, so a process-wide chdir is safe.
+    os.chdir(project_dir)
     emit({"event": "loaded", "project": args.project, "title": getattr(project, "title", "")})
 
     import httpx  # imported here so the loader is usable without httpx installed
@@ -115,8 +126,12 @@ async def run(args: argparse.Namespace) -> int:
                 "event": "item_end", "project": args.project,
                 "item": item.description(), "state": item.state,
                 "ok": item.state == Item.COMPLETED,
+                "error": getattr(item, "last_error", None),
                 "bytes": int(item.get("carousel_bytes", 0)),
                 "completed": runner.completed, "failed": runner.failed,
+            }),
+            on_threads=lambda threads: emit({
+                "event": "threads", "project": args.project, "threads": threads,
             }),
         )
 

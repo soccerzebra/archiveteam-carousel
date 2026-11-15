@@ -39,10 +39,15 @@ class WorkerState(str, enum.Enum):
 
 
 class ItemStatus(BaseModel):
-    item_id: str
-    item_name: str
-    task: str = ""            # current task name
-    bytes_downloaded: int = 0
+    """One in-flight item = one busy worker thread (slot)."""
+
+    slot: int = 0             # which concurrency slot (0..concurrent_items-1)
+    item_id: str = ""
+    item_name: str = ""
+    task: str = ""            # current pipeline step
+    started: float = 0.0      # epoch seconds the item began (UI derives elapsed)
+    bytes_up: int = 0         # archived bytes uploaded so far for this item
+    bytes_down: int = 0       # bytes downloaded (when the pipeline reports it)
 
 
 class WorkerStatus(BaseModel):

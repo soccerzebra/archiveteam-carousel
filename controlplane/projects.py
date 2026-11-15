@@ -68,7 +68,15 @@ class ProjectInstaller:
         else:
             if checkout.exists():
                 shutil.rmtree(checkout)
-            await _run("git", "clone", "--depth", "1", info.repository, str(checkout))
+            # --recurse-submodules: some projects (e.g. urlteam2's terroroftinytown) keep
+            # their client code in a submodule the pipeline imports; a plain clone leaves it
+            # empty. --shallow-submodules keeps the extra fetch cheap.
+            await _run("git", "clone", "--depth", "1", "--recurse-submodules",
+                       "--shallow-submodules", info.repository, str(checkout))
+        # Make sure submodules are present and current on both clone and fetch paths.
+        if (checkout / ".gitmodules").exists():
+            await _run("git", "submodule", "update", "--init", "--recursive", "--depth", "1",
+                       cwd=str(checkout))
         return checkout
 
     async def pin_version(self, info: ProjectInfo, checkout: Path) -> Path:

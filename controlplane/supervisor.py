@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from .config import ConfigStore
-from .models import ProjectInfo, WorkerState, WorkerStatus
+from .models import ItemStatus, ProjectInfo, WorkerState, WorkerStatus
 from .projects import ProjectInstaller
 
 
@@ -42,8 +42,13 @@ def apply_status_event(status: WorkerStatus, event: dict) -> None:
         status.items_done = event.get("completed", status.items_done)
         status.items_failed = event.get("failed", status.items_failed)
         status.bytes_uploaded += int(event.get("bytes", 0) or 0)
+        # surface the most recent per-item failure reason (cleared on a success)
+        status.last_error = event.get("error") or (None if event.get("ok") else status.last_error)
+    elif kind == "threads":
+        status.active_items = [ItemStatus(**t) for t in event.get("threads", [])]
     elif kind == "stopped":
         status.state = WorkerState.STOPPED
+        status.active_items = []
         status.items_done = event.get("completed", status.items_done)
         status.items_failed = event.get("failed", status.items_failed)
 
@@ -126,6 +131,7 @@ class SubprocessWorker:
             if event and self._on_event:
                 self._on_event(self.project, event)
         returncode = await self._proc.wait()
+        self.status.active_items = []  # no live threads once the process is gone
         if self.status.state != WorkerState.STOPPED:
             self.status.state = (WorkerState.STOPPED if returncode == 0
                                  else WorkerState.FAILED)

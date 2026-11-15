@@ -20,11 +20,17 @@ class Pipeline:
         # relative to here); tasks that chdir use it.
         self.cwd = os.getcwd()
 
-    async def run_item(self, item: Any, ctx: Any) -> None:
-        """Drive one item through every task in order. Raises if a task fails."""
+    async def run_item(self, item: Any, ctx: Any, on_task: Any = None) -> None:
+        """Drive one item through every task in order. Raises if a task fails.
+
+        ``on_task(item, task_name)`` is called before each task so the Runner can report the
+        current step for the live per-thread view.
+        """
         for task in self.tasks:
             if item.canceled:
                 return
+            if on_task is not None:
+                on_task(item, getattr(task, "name", task.__class__.__name__))
             await task.run(item, ctx)
 
     def __str__(self) -> str:
