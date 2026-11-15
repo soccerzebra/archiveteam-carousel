@@ -153,6 +153,44 @@ def test_stats_endpoint_without_store(tmp_path):
     assert "buckets" in body
 
 
+def _basic(user, pw):
+    import base64
+    return {"Authorization": "Basic " + base64.b64encode(f"{user}:{pw}".encode()).decode()}
+
+
+def test_http_auth_protects_ui_and_healthz_stays_open(tmp_path):
+    client, cp = make_client(tmp_path)
+    with client:
+        # enabling auth is allowed (not yet protected)
+        r = client.post("/api/settings", json={"http_username": "bob", "http_password": "pw"})
+        assert r.status_code == 200 and r.json()["http_auth"] is True
+        # now unauthenticated requests are rejected...
+        assert client.get("/api/status").status_code == 401
+        assert client.get("/").status_code == 401
+        # ...but the health check endpoint stays open...
+        assert client.get("/healthz").status_code == 200
+        # ...and correct credentials work.
+        assert client.get("/api/status", headers=_basic("bob", "pw")).status_code == 200
+        assert client.get("/api/status", headers=_basic("bob", "wrong")).status_code == 401
+
+
+def test_blank_password_keeps_existing_and_clearing_user_disables(tmp_path):
+    client, cp = make_client(tmp_path)
+    with client:
+        client.post("/api/settings", json={"http_username": "bob", "http_password": "pw"})
+        auth = _basic("bob", "pw")
+        # a save with a blank password keeps the stored one (UI never echoes it back)
+        r = client.post("/api/settings", json={"max_concurrent_items": 5,
+                                               "http_username": "bob", "http_password": ""},
+                        headers=auth)
+        assert r.status_code == 200
+        assert cp.config.global_config.http_password == "pw"
+        # clearing the username turns protection off and drops the password
+        client.post("/api/settings", json={"http_username": "", "http_password": ""}, headers=auth)
+    assert cp.config.global_config.http_username == ""
+    assert cp.config.global_config.http_password == ""
+
+
 def test_index_served(tmp_path):
     client, _ = make_client(tmp_path)
     with client:

@@ -48,6 +48,9 @@ class ControlPlane:
             "max_concurrent_items": gc.max_concurrent_items,
             "max_rsync_threads": gc.max_rsync_threads,
             "bandwidth_limit": gc.bandwidth_limit,
+            "http_username": gc.http_username,
+            "http_password_set": bool(gc.http_password),
+            "http_auth": bool(gc.http_username and gc.http_password),
             "budget": self.supervisor.budget(),
             "workers": [w.model_dump() for w in self.supervisor.snapshot()],
         }
@@ -92,6 +95,14 @@ class ControlPlane:
             gc.max_rsync_threads = int(data["max_rsync_threads"])
         if "bandwidth_limit" in data:
             gc.bandwidth_limit = max(0, int(data["bandwidth_limit"] or 0))
+        # Web-interface auth. Username empty => protection off. A blank password keeps the
+        # existing one (so the UI never has to echo the stored password back).
+        if "http_username" in data:
+            gc.http_username = str(data["http_username"]).strip()
+        if "http_password" in data and str(data["http_password"]):
+            gc.http_password = str(data["http_password"])
+        if not gc.http_username:
+            gc.http_password = ""
         # per-project concurrency overrides, e.g. {"projects": {"urls": 3}}
         for name, ci in (data.get("projects") or {}).items():
             self.config.project(name).concurrent_items = int(ci) if ci else None

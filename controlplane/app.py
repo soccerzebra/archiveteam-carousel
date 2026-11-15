@@ -8,17 +8,38 @@ project, set the budget, graceful stop). ``main()`` is the ``carousel`` entrypoi
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import os
+import secrets
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from .config import ConfigStore
 from .core import ControlPlane
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+
+
+def _auth_ok(auth_header: str | None, username: str, password: str) -> bool:
+    """Validate an HTTP Basic ``Authorization`` header against the configured credentials.
+
+    When no username+password is configured, access is open (returns True).
+    """
+    if not (username and password):
+        return True
+    if not auth_header or not auth_header.lower().startswith("basic "):
+        return False
+    try:
+        decoded = base64.b64decode(auth_header.split(" ", 1)[1]).decode("utf-8")
+    except Exception:
+        return False
+    user, _, pw = decoded.partition(":")
+    # constant-time compare to avoid leaking length/contents via timing
+    return (secrets.compare_digest(user, username)
+            and secrets.compare_digest(pw, password))
 
 
 def create_app(cp: ControlPlane, *, heartbeat_interval: float = 600.0,
@@ -60,10 +81,25 @@ def create_app(cp: ControlPlane, *, heartbeat_interval: float = 600.0,
 
     app = FastAPI(title="Carousel", lifespan=lifespan)
 
+    @app.middleware("http")
+    async def _basic_auth(request, call_next):
+        # /healthz stays open so the container health check works even with auth on.
+        if request.url.path != "/healthz":
+            gc = cp.config.global_config
+            if not _auth_ok(request.headers.get("authorization"),
+                            gc.http_username, gc.http_password):
+                return Response(status_code=401, headers={
+                    "WWW-Authenticate": 'Basic realm="Archive Carousel"'})
+        return await call_next(request)
+
+    @app.get("/healthz")
+    async def healthz() -> JSONResponse:
+        return JSONResponse({"ok": True})
+
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
         index_html = WEB_DIR / "index.html"
-        return index_html.read_text() if index_html.exists() else "<h1>Carousel</h1>"
+        return index_html.read_text() if index_html.exists() else "<h1>Archive Carousel</h1>"
 
     @app.get("/api/status")
     async def status() -> JSONResponse:
@@ -116,6 +152,11 @@ def create_app(cp: ControlPlane, *, heartbeat_interval: float = 600.0,
 
     @app.websocket("/ws")
     async def ws(socket: WebSocket) -> None:
+        gc = cp.config.global_config
+        if not _auth_ok(socket.headers.get("authorization"),
+                        gc.http_username, gc.http_password):
+            await socket.close(code=1008)  # policy violation; UI falls back to polling
+            return
         await socket.accept()
         try:
             while True:
