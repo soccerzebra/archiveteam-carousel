@@ -47,9 +47,18 @@ class ControlPlane:
         await self.supervisor.check_updates()
 
     def _apply_choice(self) -> None:
-        """Set the supervisor's forced set from ArchiveTeam's Choice (empty when off)."""
+        """Set the supervisor's forced set from ArchiveTeam's Choice (empty when off).
+
+        Projects the user opted out of are dropped, so they can disable one AT pick without
+        leaving the mode.
+        """
         gc = self.config.global_config
-        self.supervisor.forced = set(self._auto_projects) if gc.archiveteam_choice else set()
+        if not gc.archiveteam_choice:
+            self.supervisor.forced = set()
+            return
+        self.supervisor.forced = {
+            n for n in self._auto_projects if not self.config.project(n).at_optout
+        }
 
     async def monitor_once(self) -> None:
         """Fast loop: restart crashed workers, re-apply budget. No network."""
@@ -89,24 +98,35 @@ class ControlPlane:
     def projects(self) -> dict:
         enabled = set(self.config.enabled_projects())
         auto = set(self._auto_projects) if self.config.global_config.archiveteam_choice else set()
+        forced = self.supervisor.forced  # AT picks minus opt-outs (empty when mode off)
         rows = []
         for p in self.supervisor.catalog.values():
             row = p.model_dump()
-            # a project is on when manually enabled OR force-run by ArchiveTeam's Choice
-            row["at_choice"] = p.name in auto  # tagged + locked in the UI while choice is on
-            row["enabled"] = p.name in enabled or p.name in auto
             pc = self.config.projects.get(p.name)
+            row["at_choice"] = p.name in auto  # an AT pick (tagged in the UI)
+            row["at_optout"] = p.name in auto and bool(pc and pc.at_optout)  # picked but off
+            # running when manually enabled OR force-run by AT (opt-outs already excluded)
+            row["enabled"] = p.name in enabled or p.name in forced
             row["concurrent_items"] = pc.concurrent_items if pc else None
             rows.append(row)
         return {"projects": rows, "enabled": [r["name"] for r in rows if r["enabled"]]}
 
     async def set_enabled(self, name: str, enabled: bool) -> None:
         pc = self.config.project(name)
-        pc.enabled = enabled
-        # Seed a concrete thread count the first time a project is enabled, so the per-project
-        # value is explicit and editable rather than an implicit fallback.
-        if enabled and not pc.concurrent_items:
-            pc.concurrent_items = clamp_threads(self.config.global_config.default_project_threads)
+        gc = self.config.global_config
+        is_at_pick = gc.archiveteam_choice and name in self._auto_projects
+        if enabled:
+            pc.enabled = True
+            pc.at_optout = False  # re-enabling clears any AT opt-out
+            # Seed a concrete thread count the first time a project is enabled.
+            if not pc.concurrent_items:
+                pc.concurrent_items = clamp_threads(gc.default_project_threads)
+        else:
+            pc.enabled = False
+            # Turning off an AT pick records an opt-out so it stays off while the mode is on.
+            if is_at_pick:
+                pc.at_optout = True
+        self._apply_choice()
         self.config.save()
         await self.supervisor.reconcile()
 

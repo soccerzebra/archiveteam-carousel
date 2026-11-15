@@ -104,6 +104,9 @@ class ProjectConfig(BaseModel):
 
     project: str
     enabled: bool = False
+    # User opted this project OUT of ArchiveTeam's Choice: even when HQ picks it, don't run it.
+    # Lets the user drop one AT pick (e.g. a rate-limited project) without leaving the mode.
+    at_optout: bool = False
     # Absolute per-project thread count (concurrent items), 1..PROJECT_THREADS_MAX. None means
     # "not set yet" — the supervisor falls back to GlobalConfig.default_project_threads.
     concurrent_items: int | None = None

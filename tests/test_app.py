@@ -22,6 +22,7 @@ class FakeSupervisor:
     def __init__(self, config):
         self.config = config
         self.catalog = {}
+        self.forced = set()
         self.reconciles = 0
 
     def set_catalog(self, projects):
@@ -206,3 +207,20 @@ def test_index_served(tmp_path):
     with client:
         r = client.get("/")
     assert r.status_code == 200 and "Carousel" in r.text
+
+
+def test_at_choice_optout_disables_one_pick(tmp_path):
+    client, cp = make_client(tmp_path)
+    cp._auto_projects = ["urls", "reddit"]  # HQ's current picks
+    cp.config.global_config.archiveteam_choice = True
+    cp._apply_choice()
+    assert cp.supervisor.forced == {"urls", "reddit"}
+    with client:
+        # opt one pick out — it stops, the other keeps following AT
+        client.post("/api/projects/urls/disable")
+        assert cp.config.project("urls").at_optout is True
+        assert cp.supervisor.forced == {"reddit"}
+        # re-enabling clears the opt-out and it rejoins the set
+        client.post("/api/projects/urls/enable")
+        assert cp.config.project("urls").at_optout is False
+        assert "urls" in cp.supervisor.forced

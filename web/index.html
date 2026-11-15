@@ -129,6 +129,7 @@
   .attag { display:inline-block; margin-left:6px; font-size:10px; font-weight:600; padding:1px 6px;
            border-radius:5px; color:var(--accent); background:var(--accent-soft);
            vertical-align:middle; }
+  .attag.off { color:var(--muted); background:var(--chip); }
   .proj .src { font-size:11px; color:var(--muted); border:1px solid var(--border);
                border-radius:6px; padding:1px 7px; margin-left:8px; vertical-align:middle; }
   .proj .plogo { width:46px; height:46px; flex:0 0 auto; object-fit:contain; border-radius:8px;
@@ -508,11 +509,13 @@ function renderProjects(p) {
       ? `<img class="plogo" src="${esc(proj.logo)}" alt="" loading="lazy"
             onerror="this.style.visibility='hidden'">`
       : `<span class="plogo"></span>`;
-    const forced = !!proj.at_choice;  // forced on by ArchiveTeam's Choice — locked
-    const tag = forced ? `<span class="attag" title="Run by ArchiveTeam's Choice">AT's Choice</span>` : '';
+    const atPick = !!proj.at_choice, optout = !!proj.at_optout;  // an AT pick; turned off by you
+    const tag = atPick
+      ? `<span class="attag${optout ? ' off' : ''}" title="${optout ? "An ArchiveTeam's Choice pick you turned off — toggle on to follow it again" : "Run by ArchiveTeam's Choice — toggle off to skip just this one"}">AT's Choice${optout ? ' · off' : ''}</span>`
+      : '';
     div.innerHTML = `
-      <label class="switch" title="${forced ? "Forced on by ArchiveTeam's Choice" : ''}">
-        <input type="checkbox" ${on?'checked':''} ${forced?'disabled':''} data-name="${esc(proj.name)}">
+      <label class="switch">
+        <input type="checkbox" ${on?'checked':''} data-name="${esc(proj.name)}">
         <span class="slider"></span></label>
       ${logo}
       <div style="flex:1;min-width:0">
