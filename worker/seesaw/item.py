@@ -20,10 +20,10 @@ class ItemValue:
     def __init__(self, key: str):
         self.key = key
 
-    def realize(self, item: "Item") -> Any:
+    def realize(self, item: Item) -> Any:
         return item[self.key]
 
-    def fill(self, item: "Item", value: Any) -> None:
+    def fill(self, item: Item, value: Any) -> None:
         item[self.key] = value
 
     def __str__(self) -> str:
@@ -40,7 +40,7 @@ class ItemInterpolation:
     def __init__(self, format_string: str):
         self.format_string = format_string
 
-    def realize(self, item: "Item") -> str:
+    def realize(self, item: Item) -> str:
         return self.format_string % item
 
     def __str__(self) -> str:
@@ -76,7 +76,7 @@ class Item(dict):
     def log_output(self, message: Any) -> None:
         self.log.append(str(message))
         if len(self.log) > self.LOG_CAP:
-            del self.log[:-self.LOG_CAP]
+            del self.log[: -self.LOG_CAP]
 
     def description(self) -> str:
         return self.get("item_name") or f"Item {self.item_id}"

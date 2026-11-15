@@ -42,7 +42,8 @@ class ConfigStore:
             return
         # Seed from environment variables.
         seed = {k: os.environ[v] for k, v in _ENV_MAP.items() if os.environ.get(v)}
-        self.global_config = GlobalConfig(**seed)
+        # Env values are strings; pydantic coerces them to the field types at runtime.
+        self.global_config = GlobalConfig(**seed)  # type: ignore[arg-type]
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

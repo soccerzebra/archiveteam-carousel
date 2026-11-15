@@ -40,33 +40,45 @@ def outputs(api: dict) -> dict[str, Any]:
     res: dict[str, Any] = {}
 
     res["request_body"] = GetItemFromTracker(
-        "https://tracker.example/demo/multi=1/", DOWNLOADER, VERSION).data(item)
+        "https://tracker.example/demo/multi=1/", DOWNLOADER, VERSION
+    ).data(item)
 
     res["upload_body"] = UploadWithTracker(
-        "https://tracker.example/demo", downloader=DOWNLOADER, version=VERSION,
-        files=[II("%(data_dir)s/%(warc_file_base)s.warc.zst")]).data(item)
+        "https://tracker.example/demo",
+        downloader=DOWNLOADER,
+        version=VERSION,
+        files=[II("%(data_dir)s/%(warc_file_base)s.warc.zst")],
+    ).data(item)
 
     rsync = RsyncUpload(
         "rsync://tracker.example/demo/",
         [II("%(data_dir)s/%(warc_file_base)s.warc.zst")],
-        target_source_path=II("%(data_dir)s/"), bwlimit="0",
-        extra_args=["--recursive", "--min-size", "1", "--no-compress", "--compress-level", "0"])
+        target_source_path=II("%(data_dir)s/"),
+        bwlimit="0",
+        extra_args=["--recursive", "--min-size", "1", "--no-compress", "--compress-level", "0"],
+    )
     res["rsync_argv"] = realize(rsync.args, item)
     res["rsync_stdin"] = rsync.stdin_data(item).decode("utf-8")
 
-    wget = WgetDownload([
-        "wget-at",
-        "-o", II("%(item_dir)s/wget.log"),
-        "--warc-file", II("%(item_dir)s/%(warc_file_base)s"),
-        "--warc-header", "x-wget-at-project-name: demo",
-        "https://example.org/",
-    ])
+    wget = WgetDownload(
+        [
+            "wget-at",
+            "-o",
+            II("%(item_dir)s/wget.log"),
+            "--warc-file",
+            II("%(item_dir)s/%(warc_file_base)s"),
+            "--warc-header",
+            "x-wget-at-project-name: demo",
+            "https://example.org/",
+        ]
+    )
     res["wget_argv"] = realize(wget.args, item)
 
     stats = PrepareStatsForTracker(
         defaults={"downloader": DOWNLOADER, "version": VERSION},
         file_groups={},  # no filesystem dependency; byte-summing is covered elsewhere
-        id_function=lambda it: it["warc_file_base"])
+        id_function=lambda it: it["warc_file_base"],
+    )
     stats.process(item)
     res["stats"] = item["stats"]
 

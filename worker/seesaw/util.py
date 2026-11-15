@@ -7,7 +7,8 @@ list of candidate paths, verifying each reports an acceptable version.
 from __future__ import annotations
 
 import subprocess
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 
 def test_executable(name: str, version: Any, path: str, version_arg: str = "-V") -> bool:
@@ -46,8 +47,9 @@ def test_executable(name: str, version: Any, path: str, version_arg: str = "-V")
     return True
 
 
-def find_executable(name: str, version: Any, paths: Iterable[str],
-                    version_arg: str = "-V") -> str | None:
+def find_executable(
+    name: str, version: Any, paths: Iterable[str], version_arg: str = "-V"
+) -> str | None:
     """Return the first candidate path that is an acceptable ``name``, or None."""
     for path in paths:
         if test_executable(name, version, path, version_arg):

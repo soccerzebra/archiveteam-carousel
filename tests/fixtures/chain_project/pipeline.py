@@ -4,13 +4,16 @@
 # via extra_context), exactly as the warrior injects `downloader` for real projects.
 import os
 
-from seesaw.project import Project
-from seesaw.pipeline import Pipeline
-from seesaw.item import ItemValue, ItemInterpolation
-from seesaw.task import SimpleTask
 from seesaw.externalprocess import ExternalProcess
+from seesaw.item import ItemInterpolation, ItemValue
+from seesaw.pipeline import Pipeline
+from seesaw.project import Project
+from seesaw.task import SimpleTask
 from seesaw.tracker import (
-    GetItemFromTracker, PrepareStatsForTracker, UploadWithTracker, SendDoneToTracker,
+    GetItemFromTracker,
+    PrepareStatsForTracker,
+    SendDoneToTracker,
+    UploadWithTracker,
 )
 
 VERSION = "1.0"
@@ -36,8 +39,13 @@ pipeline = Pipeline(
     PrepareDirectories(),
     ExternalProcess(
         "Download",
-        ["curl", "-s", "-o", ItemInterpolation("%(data_dir)s/%(warc_file_base)s.warc.zst"),
-         base_url + "/origin"],
+        [
+            "curl",
+            "-s",
+            "-o",
+            ItemInterpolation("%(data_dir)s/%(warc_file_base)s.warc.zst"),
+            base_url + "/origin",
+        ],
         max_tries=1,
     ),
     PrepareStatsForTracker(
@@ -46,7 +54,9 @@ pipeline = Pipeline(
         id_function=lambda item: item["warc_file_base"],
     ),
     UploadWithTracker(
-        TRACKER, downloader=downloader, version=VERSION,
+        TRACKER,
+        downloader=downloader,
+        version=VERSION,
         files=[ItemInterpolation("%(data_dir)s/%(warc_file_base)s.warc.zst")],
     ),
     SendDoneToTracker(tracker_url=TRACKER, stats=ItemValue("stats")),

@@ -18,8 +18,9 @@ class FakeWorker:
         self.concurrent_items = concurrent_items
         self.limit_rate = limit_rate
         self.stopped = False
-        self.status = WorkerStatus(project=project, state=WorkerState.RUNNING,
-                                   concurrent_items=concurrent_items)
+        self.status = WorkerStatus(
+            project=project, state=WorkerState.RUNNING, concurrent_items=concurrent_items
+        )
 
     async def stop(self, graceful=True):
         self.stopped = True
@@ -32,8 +33,9 @@ class FakeBackend:
     def __init__(self):
         self.spawns = []
 
-    async def spawn(self, project, version_dir, concurrent_items, downloader, data_dir,
-                    limit_rate=0):
+    async def spawn(
+        self, project, version_dir, concurrent_items, downloader, data_dir, limit_rate=0
+    ):
         self.spawns.append((project, concurrent_items, downloader))
         return FakeWorker(project, version_dir, concurrent_items, limit_rate)
 
@@ -56,14 +58,19 @@ def make_supervisor(tmp_path, downloader="josh", max_items=6):
     config.global_config.downloader = downloader
     config.global_config.max_concurrent_items = max_items
     sup = Supervisor(config, FakeInstaller(), FakeBackend(), data_dir="/data")
-    sup.set_catalog([
-        ProjectInfo(name="urls", title="URLs", source=ProjectSource.GIT, repository="git://u"),
-        ProjectInfo(name="reddit", title="Reddit", source=ProjectSource.GIT, repository="git://r"),
-    ])
+    sup.set_catalog(
+        [
+            ProjectInfo(name="urls", title="URLs", source=ProjectSource.GIT, repository="git://u"),
+            ProjectInfo(
+                name="reddit", title="Reddit", source=ProjectSource.GIT, repository="git://r"
+            ),
+        ]
+    )
     return config, sup
 
 
 # --- pure helpers ------------------------------------------------------------------
+
 
 def test_split_budget_equal():
     assert split_budget(["a", "b"], 6, {}) == {"a": 3, "b": 3}
@@ -74,7 +81,7 @@ def test_split_budget_with_override():
 
 
 def test_split_budget_minimum_one():
-    assert split_budget(["a", "b", "c", "d", "e"], 2, {}) == {k: 1 for k in "abcde"}
+    assert split_budget(["a", "b", "c", "d", "e"], 2, {}) == dict.fromkeys("abcde", 1)
 
 
 def test_apply_status_line_progression():
@@ -93,10 +100,13 @@ def test_apply_status_line_progression():
 
 def test_apply_status_line_threads_populates_active_items():
     s = WorkerStatus(project="urls")
-    apply_status_line(s, '{"event":"threads","threads":['
-                         '{"slot":0,"item_id":"a1","item_name":"job A","task":"WgetDownload",'
-                         '"started":123.0,"bytes_up":500},'
-                         '{"slot":1,"item_id":"b2","item_name":"job B","task":"RsyncUpload"}]}')
+    apply_status_line(
+        s,
+        '{"event":"threads","threads":['
+        '{"slot":0,"item_id":"a1","item_name":"job A","task":"WgetDownload",'
+        '"started":123.0,"bytes_up":500},'
+        '{"slot":1,"item_id":"b2","item_name":"job B","task":"RsyncUpload"}]}',
+    )
     assert [t.slot for t in s.active_items] == [0, 1]
     assert s.active_items[0].task == "WgetDownload" and s.active_items[0].bytes_up == 500
     assert s.active_items[1].item_name == "job B"
@@ -122,6 +132,7 @@ def test_apply_status_line_ignores_garbage():
 
 # --- reconcile ---------------------------------------------------------------------
 
+
 async def test_reconcile_starts_enabled_projects(tmp_path):
     config, sup = make_supervisor(tmp_path)
     config.project("urls").enabled = True
@@ -129,7 +140,7 @@ async def test_reconcile_starts_enabled_projects(tmp_path):
     await sup.reconcile()
     assert set(sup.workers) == {"urls", "reddit"}
     # 6 items split across 2 projects => 3 each
-    assert dict((p, ci) for p, ci, _ in sup.backend.spawns) == {"urls": 3, "reddit": 3}
+    assert {p: ci for p, ci, _ in sup.backend.spawns} == {"urls": 3, "reddit": 3}
 
 
 async def test_reconcile_stops_disabled_project(tmp_path):
@@ -172,7 +183,7 @@ async def test_reconcile_restarts_crashed_worker(tmp_path):
     crashed = sup.workers["urls"]
     crashed.status.state = WorkerState.FAILED  # simulate the process dying
     await sup.reconcile()
-    assert sup.workers["urls"] is not crashed          # replaced with a fresh worker
+    assert sup.workers["urls"] is not crashed  # replaced with a fresh worker
     assert sup.workers["urls"].snapshot().state is WorkerState.RUNNING
     assert len(sup.backend.spawns) == 2
 
@@ -185,10 +196,11 @@ async def test_check_updates_restarts_stale_worker(tmp_path):
 
     async def has_update(info, version_dir):  # installer reports an upstream change
         return True
+
     sup.installer.has_update = has_update
 
     await sup.check_updates()
-    assert sup.workers["urls"] is not original          # restarted on update
+    assert sup.workers["urls"] is not original  # restarted on update
     assert len(sup.backend.spawns) == 2
 
 

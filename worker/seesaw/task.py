@@ -14,7 +14,8 @@ The pipeline awaits each task in order (see pipeline.py).
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from seesaw.config import realize
 

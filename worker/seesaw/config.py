@@ -36,20 +36,19 @@ class ConfigValue:
     plane can surface a project's declared settings in the UI.
     """
 
-    _collector: list["ConfigValue"] | None = None
+    _collector: list[ConfigValue] | None = None
 
     @classmethod
     def start_collecting(cls) -> None:
         ConfigValue._collector = []
 
     @classmethod
-    def stop_collecting(cls) -> list["ConfigValue"]:
+    def stop_collecting(cls) -> list[ConfigValue]:
         collected = ConfigValue._collector or []
         ConfigValue._collector = None
         return collected
 
-    def __init__(self, name, title="", description="", default=None,
-                 editable=True, advanced=True):
+    def __init__(self, name, title="", description="", default=None, editable=True, advanced=True):
         self.name = name
         self.title = title
         self.description = description

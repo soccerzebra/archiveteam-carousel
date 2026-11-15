@@ -14,17 +14,18 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "worker"))
 
-import run_pipeline  # noqa: E402
-from seesaw.context import RunContext  # noqa: E402
-from seesaw.item import Item  # noqa: E402
-from seesaw.task import LimitConcurrent  # noqa: E402
-from seesaw import tracker as t  # noqa: E402
+import run_pipeline
+from seesaw import tracker as t
+from seesaw.context import RunContext
+from seesaw.item import Item
+from seesaw.task import LimitConcurrent
 
 FAKE = HERE / "fixtures" / "fake_project" / "pipeline.py"
 RUNNABLE = HERE / "fixtures" / "runnable_project" / "pipeline.py"
 
 
 # --- loading + construction --------------------------------------------------------
+
 
 def test_loads_project_and_pipeline():
     project, pipeline = run_pipeline.load_pipeline(str(FAKE), downloader="josh")
@@ -58,6 +59,7 @@ def test_two_loads_are_independent():
 
 
 # --- end-to-end against a fake tracker ---------------------------------------------
+
 
 class FakeResp:
     def __init__(self, status_code, text):

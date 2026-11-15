@@ -47,8 +47,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--downloader", required=True, help="your leaderboard handle")
     ap.add_argument("--tracker", default="https://legacy-api.arpa.li/urls")
-    ap.add_argument("--version", default="20261027.01",
-                    help="project pipeline VERSION (a stale value may get a 455)")
+    ap.add_argument(
+        "--version",
+        default="20261027.01",
+        help="project pipeline VERSION (a stale value may get a 455)",
+    )
     ap.add_argument("--multi", type=int, default=1)
     ap.add_argument("--project", default="urls", help="fixture dir name")
     args = ap.parse_args()
@@ -77,8 +80,11 @@ def main() -> int:
     )
     print(f"  -> HTTP {rcode}: {rbody[:200]}")
     if rcode != 200:
-        print("WARNING: release did not return 200 — verify the item was returned, "
-              "so it isn't left claimed under your handle.", file=sys.stderr)
+        print(
+            "WARNING: release did not return 200 — verify the item was returned, "
+            "so it isn't left claimed under your handle.",
+            file=sys.stderr,
+        )
         return 1
     print("Done. Item returned; no dangling claim.")
     return 0

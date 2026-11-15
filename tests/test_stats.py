@@ -23,8 +23,8 @@ def test_records_and_totals(tmp_path):
 def test_window_excludes_old_events(tmp_path):
     db = StatsStore(tmp_path / "stats.db")
     now = 2_000_000
-    db.record_item("urls", True, 500, ts=now - 10)          # inside 1h window
-    db.record_item("urls", True, 9999, ts=now - 7200)       # 2h ago, excluded
+    db.record_item("urls", True, 500, ts=now - 10)  # inside 1h window
+    db.record_item("urls", True, 9999, ts=now - 7200)  # 2h ago, excluded
     s = db.series(hours=1, buckets=6, now=now)
     assert s["totals"]["bytes"] == 500
     assert s["totals"]["items_done"] == 1

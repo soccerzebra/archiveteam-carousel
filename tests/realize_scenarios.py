@@ -17,7 +17,8 @@ means parity on the values a real project actually resolves.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 
 def run(
@@ -57,8 +58,14 @@ def run(
 
     # ConfigValue -> its current value (urls-grab's rsync_threads knob).
     results["number_default"] = realize(
-        NumberConfigValue(min=1, max=20, default="2", name="shared:rsync_threads",
-                          title="Rsync threads", description="max concurrent uploads"),
+        NumberConfigValue(
+            min=1,
+            max=20,
+            default="2",
+            name="shared:rsync_threads",
+            title="Rsync threads",
+            description="max concurrent uploads",
+        ),
         item,
     )
 

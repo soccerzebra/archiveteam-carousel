@@ -2,14 +2,17 @@
 # dependencies (no wget-at, requests, lupa, zstandard) so the LOADER + full seesaw surface
 # can be exercised offline. `downloader` is injected by the loader, exactly as the warrior
 # injects it for real projects.
-from seesaw.project import Project
-from seesaw.pipeline import Pipeline
-from seesaw.item import ItemValue, ItemInterpolation
-from seesaw.task import SimpleTask, LimitConcurrent
 from seesaw.config import NumberConfigValue
 from seesaw.externalprocess import WgetDownload
+from seesaw.item import ItemInterpolation, ItemValue
+from seesaw.pipeline import Pipeline
+from seesaw.project import Project
+from seesaw.task import LimitConcurrent, SimpleTask
 from seesaw.tracker import (
-    GetItemFromTracker, PrepareStatsForTracker, UploadWithTracker, SendDoneToTracker,
+    GetItemFromTracker,
+    PrepareStatsForTracker,
+    SendDoneToTracker,
+    UploadWithTracker,
 )
 
 VERSION = "20261101.01"
@@ -34,7 +37,8 @@ project = Project(
 
 pipeline = Pipeline(
     GetItemFromTracker(
-        "https://{}/{}/multi=1/".format(TRACKER_HOST, TRACKER_ID), downloader, VERSION),
+        f"https://{TRACKER_HOST}/{TRACKER_ID}/multi=1/", downloader, VERSION
+    ),
     PrepareDirectories(),
     WgetDownload(["echo", "would-grab"], max_tries=1, accept_on_exit_code=[0]),
     PrepareStatsForTracker(
@@ -43,8 +47,14 @@ pipeline = Pipeline(
         id_function=lambda item: item["warc_file_base"],
     ),
     LimitConcurrent(
-        NumberConfigValue(min=1, max=20, default="2", name="shared:rsync_threads",
-                          title="Rsync threads", description="max concurrent uploads"),
+        NumberConfigValue(
+            min=1,
+            max=20,
+            default="2",
+            name="shared:rsync_threads",
+            title="Rsync threads",
+            description="max concurrent uploads",
+        ),
         UploadWithTracker(
             "https://%s/%s" % (TRACKER_HOST, TRACKER_ID),
             downloader=downloader,

@@ -12,6 +12,6 @@ from typing import Any
 
 @dataclass
 class RunContext:
-    http: Any = None          # async HTTP client (httpx.AsyncClient-shaped); may be None in tests
-    data_dir: str = ""        # per-project data directory
-    downloader: str = ""      # the one leaderboard identity, shared across projects
+    http: Any = None  # async HTTP client (httpx.AsyncClient-shaped); may be None in tests
+    data_dir: str = ""  # per-project data directory
+    downloader: str = ""  # the one leaderboard identity, shared across projects

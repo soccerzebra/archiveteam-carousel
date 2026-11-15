@@ -13,7 +13,7 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "worker"))
 
-from seesaw import tracker as t  # noqa: E402
+from seesaw import tracker as t
 
 FIX = HERE / "fixtures" / "urls_tracker"
 TRACKER = "https://legacy-api.arpa.li/urls"
@@ -52,12 +52,17 @@ def test_get_item_polls_past_404_then_succeeds():
     assert len(http.calls) == 2
     assert http.calls[0]["url"] == f"{TRACKER}/multi=1/request"
     # the posted body is exactly the pinned request contract
-    assert json.loads(http.calls[0]["content"]) == {"downloader": "testhandle", "version": "20261027.01"}
+    assert json.loads(http.calls[0]["content"]) == {
+        "downloader": "testhandle",
+        "version": "20261027.01",
+    }
     assert http.calls[0]["headers"]["User-Agent"].startswith("ArchiveTeam Warrior/")
 
 
 def test_get_item_retries_empty_200():
-    c, http = client([FakeResp(200, json.dumps({})), FakeResp(200, (FIX / "request_response.json").read_text())])
+    c, http = client(
+        [FakeResp(200, json.dumps({})), FakeResp(200, (FIX / "request_response.json").read_text())]
+    )
     data = asyncio.run(c.get_item("testhandle", "20261027.01"))
     assert "item_name" in data and len(http.calls) == 2
 

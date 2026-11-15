@@ -10,12 +10,12 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parent
-sys.path.insert(0, str(REPO / "worker"))   # our clean-room `seesaw`
+sys.path.insert(0, str(REPO / "worker"))  # our clean-room `seesaw`
 sys.path.insert(0, str(HERE))
 
-from seesaw.config import realize, NumberConfigValue, StringConfigValue  # noqa: E402
-from seesaw.item import ItemValue, ItemInterpolation  # noqa: E402
-import realize_scenarios  # noqa: E402
+import realize_scenarios
+from seesaw.config import NumberConfigValue, StringConfigValue, realize
+from seesaw.item import ItemInterpolation, ItemValue
 
 GOLDEN = json.loads((HERE / "golden" / "realize_golden.json").read_text())
 

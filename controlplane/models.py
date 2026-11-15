@@ -8,6 +8,7 @@ status channel all speak these exact types with no serialization drift.
 from __future__ import annotations
 
 import enum
+
 from pydantic import BaseModel
 
 
@@ -23,11 +24,11 @@ class ProjectInfo(BaseModel):
     title: str = ""
     source: ProjectSource
     repository: str | None = None  # git URL   (source == GIT)
-    docker: str | None = None      # image ref (source == DOCKER)
+    docker: str | None = None  # image ref (source == DOCKER)
     deadline: str | None = None
-    description: str = ""          # one-line blurb from HQ
-    logo: str | None = None        # project icon URL (HQ-hosted)
-    leaderboard: str | None = None # tracker leaderboard URL
+    description: str = ""  # one-line blurb from HQ
+    logo: str | None = None  # project icon URL (HQ-hosted)
+    leaderboard: str | None = None  # tracker leaderboard URL
 
 
 class WorkerState(str, enum.Enum):
@@ -41,14 +42,14 @@ class WorkerState(str, enum.Enum):
 class ItemStatus(BaseModel):
     """One in-flight item = one busy worker thread (slot)."""
 
-    slot: int = 0             # which concurrency slot (0..concurrent_items-1)
+    slot: int = 0  # which concurrency slot (0..concurrent_items-1)
     item_id: str = ""
     item_name: str = ""
-    task: str = ""            # current pipeline step
-    started: float = 0.0      # epoch seconds the item began (UI derives elapsed)
-    bytes_up: int = 0         # archived bytes uploaded so far for this item
-    bytes_down: int = 0       # bytes downloaded (when the pipeline reports it)
-    log: list[str] = []       # last few log lines for this thread (live tail)
+    task: str = ""  # current pipeline step
+    started: float = 0.0  # epoch seconds the item began (UI derives elapsed)
+    bytes_up: int = 0  # archived bytes uploaded so far for this item
+    bytes_down: int = 0  # bytes downloaded (when the pipeline reports it)
+    log: list[str] = []  # last few log lines for this thread (live tail)
 
 
 class WorkerStatus(BaseModel):
@@ -61,7 +62,7 @@ class WorkerStatus(BaseModel):
     title: str = ""
     state: WorkerState = WorkerState.STARTING
     pid: int | None = None
-    concurrent_items: int = 0          # this project's slice of the global budget
+    concurrent_items: int = 0  # this project's slice of the global budget
     active_items: list[ItemStatus] = []
     items_done: int = 0
     items_failed: int = 0
@@ -72,8 +73,8 @@ class WorkerStatus(BaseModel):
 class GlobalConfig(BaseModel):
     """Warrior-wide settings. Shared across every worker."""
 
-    downloader: str = ""               # single nickname on the leaderboards
-    warrior_id: str = ""               # assigned by HQ
+    downloader: str = ""  # single nickname on the leaderboards
+    warrior_id: str = ""  # assigned by HQ
     http_username: str = ""
     http_password: str = ""
     # Global resource budget, divided across active projects by the supervisor:
@@ -92,5 +93,5 @@ class ProjectConfig(BaseModel):
 
     project: str
     enabled: bool = False
-    concurrent_items: int | None = None   # override of the auto-divided budget
-    values: dict[str, str] = {}           # pipeline-declared config values
+    concurrent_items: int | None = None  # override of the auto-divided budget
+    values: dict[str, str] = {}  # pipeline-declared config values

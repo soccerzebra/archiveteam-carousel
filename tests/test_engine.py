@@ -11,11 +11,11 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "worker"))
 
-from seesaw.context import RunContext  # noqa: E402
-from seesaw.item import Item  # noqa: E402
-from seesaw.pipeline import Pipeline  # noqa: E402
-from seesaw.task import SimpleTask, LimitConcurrent, Task  # noqa: E402
-from runner import Runner, GracefulStop  # noqa: E402
+from runner import GracefulStop, Runner
+from seesaw.context import RunContext
+from seesaw.item import Item
+from seesaw.pipeline import Pipeline
+from seesaw.task import LimitConcurrent, SimpleTask, Task
 
 CTX = RunContext()
 
@@ -63,9 +63,9 @@ def test_limit_concurrent_caps_simultaneous_inner_runs():
     pipe = Pipeline(limited)
 
     async def go():
-        await asyncio.gather(*[
-            pipe.run_item(Item(None, {"item_name": str(i)}), CTX) for i in range(6)
-        ])
+        await asyncio.gather(
+            *[pipe.run_item(Item(None, {"item_name": str(i)}), CTX) for i in range(6)]
+        )
 
     asyncio.run(go())
     assert gauge["max"] == 2
@@ -92,8 +92,9 @@ def test_runner_concurrency_and_completion():
             await asyncio.sleep(0.005)
             gauge["cur"] -= 1
 
-    runner = Runner(Pipeline(Claim("claim"), Work("work")),
-                    concurrent_items=3, ctx=CTX, fail_delay=0)
+    runner = Runner(
+        Pipeline(Claim("claim"), Work("work")), concurrent_items=3, ctx=CTX, fail_delay=0
+    )
     asyncio.run(runner.run())
     assert runner.completed == TOTAL
     assert gauge["max"] == 3
@@ -119,8 +120,7 @@ def test_runner_survives_item_failure():
             if item["item_name"] == "item2":
                 raise RuntimeError("boom")
 
-    runner = Runner(Pipeline(Claim(), MaybeFail("mf")),
-                    concurrent_items=1, ctx=CTX, fail_delay=0)
+    runner = Runner(Pipeline(Claim(), MaybeFail("mf")), concurrent_items=1, ctx=CTX, fail_delay=0)
     asyncio.run(runner.run())
     assert seen == ["item1", "item2", "item3"]  # kept going after item2 failed
     assert runner.completed == 2 and runner.failed == 1

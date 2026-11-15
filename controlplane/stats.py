@@ -30,8 +30,7 @@ class StatsStore:
             "  ok INTEGER NOT NULL,"
             "  bytes INTEGER NOT NULL DEFAULT 0)"
         )
-        self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_item_events_ts ON item_events(ts)")
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_item_events_ts ON item_events(ts)")
         self._conn.commit()
 
     def record_item(self, project: str, ok: bool, nbytes: int, ts: int | None = None) -> None:
@@ -40,7 +39,8 @@ class StatsStore:
         with self._lock:
             self._conn.execute(
                 "INSERT INTO item_events (ts, project, ok, bytes) VALUES (?, ?, ?, ?)",
-                (when, project, 1 if ok else 0, int(nbytes or 0)))
+                (when, project, 1 if ok else 0, int(nbytes or 0)),
+            )
             self._conn.commit()
 
     def series(self, hours: float = 24.0, buckets: int = 48, now: int | None = None) -> dict:
@@ -57,7 +57,8 @@ class StatsStore:
         bucket_sec = max(1, window // buckets)
         with self._lock:
             rows = self._conn.execute(
-                "SELECT ts, ok, bytes FROM item_events WHERE ts >= ?", (start,)).fetchall()
+                "SELECT ts, ok, bytes FROM item_events WHERE ts >= ?", (start,)
+            ).fetchall()
         agg: dict[int, list[int]] = {}
         for ts, ok, nbytes in rows:
             idx = min(buckets - 1, (ts - start) // bucket_sec)
@@ -67,8 +68,14 @@ class StatsStore:
         out = []
         for i in range(buckets):
             done, failed, nbytes = agg.get(i, [0, 0, 0])
-            out.append({"t": start + i * bucket_sec, "items_done": done,
-                        "items_failed": failed, "bytes": nbytes})
+            out.append(
+                {
+                    "t": start + i * bucket_sec,
+                    "items_done": done,
+                    "items_failed": failed,
+                    "bytes": nbytes,
+                }
+            )
         return {
             "window_hours": hours,
             "bucket_seconds": bucket_sec,

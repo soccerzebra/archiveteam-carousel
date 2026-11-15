@@ -20,8 +20,9 @@ import json
 import os
 import signal
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Protocol
 
 from .config import ConfigStore
 from .models import ItemStatus, ProjectInfo, WorkerState, WorkerStatus
@@ -103,25 +104,41 @@ class WorkerHandle(Protocol):
 
 
 class WorkerBackend(Protocol):
-    async def spawn(self, project: str, version_dir: Path, concurrent_items: int,
-                    downloader: str, data_dir: str,
-                    limit_rate: int = 0) -> WorkerHandle: ...
+    async def spawn(
+        self,
+        project: str,
+        version_dir: Path,
+        concurrent_items: int,
+        downloader: str,
+        data_dir: str,
+        limit_rate: int = 0,
+    ) -> WorkerHandle: ...
 
 
 class SubprocessWorker:
     """A worker running as ``python -m worker.run_pipeline`` in its own process."""
 
-    def __init__(self, project: str, version_dir: Path, concurrent_items: int,
-                 proc: asyncio.subprocess.Process, limit_rate: int = 0,
-                 on_event: Callable[[str, dict], None] | None = None):
+    def __init__(
+        self,
+        project: str,
+        version_dir: Path,
+        concurrent_items: int,
+        proc: asyncio.subprocess.Process,
+        limit_rate: int = 0,
+        on_event: Callable[[str, dict], None] | None = None,
+    ):
         self.project = project
         self.version_dir = version_dir
         self.concurrent_items = concurrent_items
         self.limit_rate = limit_rate
         self._proc = proc
         self._on_event = on_event
-        self.status = WorkerStatus(project=project, state=WorkerState.STARTING,
-                                   pid=proc.pid, concurrent_items=concurrent_items)
+        self.status = WorkerStatus(
+            project=project,
+            state=WorkerState.STARTING,
+            pid=proc.pid,
+            concurrent_items=concurrent_items,
+        )
         self._reader = asyncio.create_task(self._read_status())
 
     async def _read_status(self) -> None:
@@ -133,8 +150,7 @@ class SubprocessWorker:
         returncode = await self._proc.wait()
         self.status.active_items = []  # no live threads once the process is gone
         if self.status.state != WorkerState.STOPPED:
-            self.status.state = (WorkerState.STOPPED if returncode == 0
-                                 else WorkerState.FAILED)
+            self.status.state = WorkerState.STOPPED if returncode == 0 else WorkerState.FAILED
         if returncode not in (0, -signal.SIGINT, -signal.SIGTERM):
             self.status.last_error = f"worker exited with code {returncode}"
 
@@ -146,7 +162,7 @@ class SubprocessWorker:
             return
         try:
             await asyncio.wait_for(self._proc.wait(), timeout=30)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._proc.kill()
         self._reader.cancel()
 
@@ -155,36 +171,55 @@ class SubprocessWorker:
 
 
 class SubprocessBackend:
-    def __init__(self, worker_root: Path,
-                 on_event: Callable[[str, dict], None] | None = None):
+    def __init__(self, worker_root: Path, on_event: Callable[[str, dict], None] | None = None):
         # Directory that makes `python -m worker.run_pipeline` importable.
         self.worker_root = str(Path(worker_root).resolve())
         self.on_event = on_event
 
-    async def spawn(self, project, version_dir, concurrent_items, downloader, data_dir,
-                    limit_rate=0):
+    async def spawn(
+        self, project, version_dir, concurrent_items, downloader, data_dir, limit_rate=0
+    ):
         env = dict(os.environ)
         env["PYTHONPATH"] = self.worker_root + os.pathsep + env.get("PYTHONPATH", "")
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "worker.run_pipeline",
-            "--project", project,
-            "--pipeline", str(Path(version_dir) / "pipeline.py"),
-            "--downloader", downloader,
-            "--concurrent-items", str(concurrent_items),
-            "--data-dir", data_dir,
-            "--limit-rate", str(int(limit_rate)),
+            sys.executable,
+            "-m",
+            "worker.run_pipeline",
+            "--project",
+            project,
+            "--pipeline",
+            str(Path(version_dir) / "pipeline.py"),
+            "--downloader",
+            downloader,
+            "--concurrent-items",
+            str(concurrent_items),
+            "--data-dir",
+            data_dir,
+            "--limit-rate",
+            str(int(limit_rate)),
             cwd=self.worker_root,
             env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=None,  # human/wget logs flow to the control plane's stderr
         )
-        return SubprocessWorker(project, Path(version_dir), concurrent_items, proc,
-                                limit_rate=limit_rate, on_event=self.on_event)
+        return SubprocessWorker(
+            project,
+            Path(version_dir),
+            concurrent_items,
+            proc,
+            limit_rate=limit_rate,
+            on_event=self.on_event,
+        )
 
 
 class Supervisor:
-    def __init__(self, config: ConfigStore, installer: ProjectInstaller,
-                 backend: WorkerBackend, data_dir: str = "/home/warrior/data"):
+    def __init__(
+        self,
+        config: ConfigStore,
+        installer: ProjectInstaller,
+        backend: WorkerBackend,
+        data_dir: str = "/home/warrior/data",
+    ):
         self.config = config
         self.installer = installer
         self.backend = backend
@@ -201,8 +236,7 @@ class Supervisor:
 
     def budget(self) -> dict[str, int]:
         desired = self._desired()
-        overrides = {n: self.config.project(n).concurrent_items
-                     for n in desired if self.config.project(n).concurrent_items}
+        overrides = {n: ci for n in desired if (ci := self.config.project(n).concurrent_items)}
         return split_budget(desired, self.config.global_config.max_concurrent_items, overrides)
 
     def download_rate(self) -> int:
@@ -236,8 +270,11 @@ class Supervisor:
                 current = self.workers.get(name)
                 if current is None:
                     await self._start(name, want, rate)
-                elif (self._is_dead(current) or current.concurrent_items != want
-                      or getattr(current, "limit_rate", 0) != rate):
+                elif (
+                    self._is_dead(current)
+                    or current.concurrent_items != want
+                    or getattr(current, "limit_rate", 0) != rate
+                ):
                     # restart a crashed/exited worker, or re-slice budget / bandwidth
                     await self._stop(name)
                     await self._start(name, want, rate)
@@ -270,9 +307,13 @@ class Supervisor:
         info = self.catalog[name]
         version_dir = await self.installer.prepare(info)
         self.workers[name] = await self.backend.spawn(
-            name, version_dir, concurrent_items,
-            self.config.global_config.downloader, self.data_dir,
-            limit_rate=limit_rate)
+            name,
+            version_dir,
+            concurrent_items,
+            self.config.global_config.downloader,
+            self.data_dir,
+            limit_rate=limit_rate,
+        )
 
     async def _stop(self, name: str) -> None:
         worker = self.workers.pop(name)

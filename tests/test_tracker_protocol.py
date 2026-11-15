@@ -14,9 +14,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parent
 sys.path.insert(0, str(REPO / "worker"))  # our clean-room `seesaw`
 
-import seesaw  # noqa: E402
-from seesaw import tracker as t  # noqa: E402
-from seesaw.item import ItemInterpolation  # noqa: E402
+from seesaw import tracker as t
+from seesaw.item import ItemInterpolation
 
 FIX = HERE / "fixtures" / "urls_tracker"
 

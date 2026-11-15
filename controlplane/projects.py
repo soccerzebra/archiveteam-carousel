@@ -24,8 +24,10 @@ from .models import ProjectInfo, ProjectSource
 
 async def _run(*args: str, cwd: str | None = None) -> str:
     proc = await asyncio.create_subprocess_exec(
-        *args, cwd=cwd,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        *args,
+        cwd=cwd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
     )
     out, _ = await proc.communicate()
     text = out.decode("utf-8", "replace")
@@ -36,8 +38,8 @@ async def _run(*args: str, cwd: str | None = None) -> str:
 
 @dataclass
 class ProjectInstaller:
-    projects_dir: Path          # working checkouts
-    versions_dir: Path          # immutable version-pinned copies workers run from
+    projects_dir: Path  # working checkouts
+    versions_dir: Path  # immutable version-pinned copies workers run from
     _refcounts: dict[Path, int] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -57,7 +59,8 @@ class ProjectInstaller:
         if info.source is ProjectSource.DOCKER:
             raise NotImplementedError(
                 "docker-image projects (crane export of /grab) are not implemented yet; "
-                "use the git `repository` source.")
+                "use the git `repository` source."
+            )
         if not info.repository:
             raise ValueError(f"project {info.name} has no git repository")
 
@@ -71,12 +74,28 @@ class ProjectInstaller:
             # --recurse-submodules: some projects (e.g. urlteam2's terroroftinytown) keep
             # their client code in a submodule the pipeline imports; a plain clone leaves it
             # empty. --shallow-submodules keeps the extra fetch cheap.
-            await _run("git", "clone", "--depth", "1", "--recurse-submodules",
-                       "--shallow-submodules", info.repository, str(checkout))
+            await _run(
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                "--recurse-submodules",
+                "--shallow-submodules",
+                info.repository,
+                str(checkout),
+            )
         # Make sure submodules are present and current on both clone and fetch paths.
         if (checkout / ".gitmodules").exists():
-            await _run("git", "submodule", "update", "--init", "--recursive", "--depth", "1",
-                       cwd=str(checkout))
+            await _run(
+                "git",
+                "submodule",
+                "update",
+                "--init",
+                "--recursive",
+                "--depth",
+                "1",
+                cwd=str(checkout),
+            )
         return checkout
 
     async def pin_version(self, info: ProjectInfo, checkout: Path) -> Path:

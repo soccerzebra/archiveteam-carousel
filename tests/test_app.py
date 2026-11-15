@@ -28,12 +28,13 @@ class FakeSupervisor:
         self.catalog = {p.name: p for p in projects}
 
     def budget(self):
-        return {n: 3 for n in self.config.enabled_projects()}
+        return dict.fromkeys(self.config.enabled_projects(), 3)
 
     def snapshot(self):
-        return [WorkerStatus(project=n, state=WorkerState.RUNNING, concurrent_items=3,
-                             items_done=7)
-                for n in self.config.enabled_projects()]
+        return [
+            WorkerStatus(project=n, state=WorkerState.RUNNING, concurrent_items=3, items_done=7)
+            for n in self.config.enabled_projects()
+        ]
 
     async def reconcile(self):
         self.reconciles += 1
@@ -53,10 +54,14 @@ def make_client(tmp_path):
     config = ConfigStore(pathlib.Path(tmp_path) / "config.json")
     config.global_config.downloader = "josh"
     sup = FakeSupervisor(config)
-    sup.set_catalog([
-        ProjectInfo(name="urls", title="URLs", source=ProjectSource.GIT, repository="git://u"),
-        ProjectInfo(name="reddit", title="Reddit", source=ProjectSource.GIT, repository="git://r"),
-    ])
+    sup.set_catalog(
+        [
+            ProjectInfo(name="urls", title="URLs", source=ProjectSource.GIT, repository="git://u"),
+            ProjectInfo(
+                name="reddit", title="Reddit", source=ProjectSource.GIT, repository="git://r"
+            ),
+        ]
+    )
     cp = ControlPlane(config, sup, hq=None)
     app = create_app(cp, run_background=False)
     return TestClient(app), cp
@@ -155,11 +160,12 @@ def test_stats_endpoint_without_store(tmp_path):
 
 def _basic(user, pw):
     import base64
+
     return {"Authorization": "Basic " + base64.b64encode(f"{user}:{pw}".encode()).decode()}
 
 
 def test_http_auth_protects_ui_and_healthz_stays_open(tmp_path):
-    client, cp = make_client(tmp_path)
+    client, _cp = make_client(tmp_path)
     with client:
         # enabling auth is allowed (not yet protected)
         r = client.post("/api/settings", json={"http_username": "bob", "http_password": "pw"})
@@ -180,9 +186,11 @@ def test_blank_password_keeps_existing_and_clearing_user_disables(tmp_path):
         client.post("/api/settings", json={"http_username": "bob", "http_password": "pw"})
         auth = _basic("bob", "pw")
         # a save with a blank password keeps the stored one (UI never echoes it back)
-        r = client.post("/api/settings", json={"max_concurrent_items": 5,
-                                               "http_username": "bob", "http_password": ""},
-                        headers=auth)
+        r = client.post(
+            "/api/settings",
+            json={"max_concurrent_items": 5, "http_username": "bob", "http_password": ""},
+            headers=auth,
+        )
         assert r.status_code == 200
         assert cp.config.global_config.http_password == "pw"
         # clearing the username turns protection off and drops the password

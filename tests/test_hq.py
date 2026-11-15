@@ -9,7 +9,7 @@ import httpx
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from controlplane.hq import HQClient, UA_REGISTER, UA_UPDATE
+from controlplane.hq import UA_REGISTER, UA_UPDATE, HQClient
 from controlplane.models import ProjectSource
 
 CATALOG = {
@@ -28,6 +28,7 @@ def make_client(seen):
         if request.url.path == "/api/update.json":
             return httpx.Response(200, json=CATALOG)
         return httpx.Response(404)
+
     transport = httpx.MockTransport(handler)
     return HQClient(client=httpx.AsyncClient(transport=transport))
 
@@ -52,8 +53,14 @@ async def test_heartbeat_wraps_payload_and_parses_catalog():
     assert req.url.path == "/api/update.json"
     assert req.headers["user-agent"] == UA_UPDATE == "ArchiveTeam Warrior/0.10.3 Warrior"
     body = json.loads(req.content)
-    assert body == {"warrior": {"warrior_id": "wid-123", "lat_lng": None,
-                                 "downloader": "josh", "selected_project": "urls"}}
+    assert body == {
+        "warrior": {
+            "warrior_id": "wid-123",
+            "lat_lng": None,
+            "downloader": "josh",
+            "selected_project": "urls",
+        }
+    }
     # catalog parsing: git vs docker classification
     by_name = {p.name: p for p in projects}
     assert by_name["urls"].source is ProjectSource.GIT

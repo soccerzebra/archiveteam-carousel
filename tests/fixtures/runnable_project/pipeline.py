@@ -1,8 +1,8 @@
 # A minimal pipeline that can be driven end-to-end offline against a fake tracker:
 # claim an item, compute stats, report done. No wget/rsync, so no real binaries or network.
-from seesaw.project import Project
-from seesaw.pipeline import Pipeline
 from seesaw.item import ItemValue
+from seesaw.pipeline import Pipeline
+from seesaw.project import Project
 from seesaw.task import SimpleTask
 from seesaw.tracker import GetItemFromTracker, SendDoneToTracker
 
@@ -17,8 +17,12 @@ class MakeStats(SimpleTask):
         super().__init__("MakeStats")
 
     def process(self, item):
-        item["stats"] = {"item": item["item_name"], "bytes": {"data": 0},
-                         "downloader": downloader, "version": VERSION}
+        item["stats"] = {
+            "item": item["item_name"],
+            "bytes": {"data": 0},
+            "downloader": downloader,
+            "version": VERSION,
+        }
 
 
 pipeline = Pipeline(

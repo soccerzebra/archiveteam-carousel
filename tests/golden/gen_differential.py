@@ -21,22 +21,33 @@ REPO = HERE.parents[1]
 sys.path.insert(0, str(REPO / "reference" / "seesaw-kit"))
 sys.path.insert(0, str(REPO / "tests"))
 
-from seesaw.config import realize, NumberConfigValue  # noqa: E402
-from seesaw.item import ItemValue, ItemInterpolation  # noqa: E402
-from seesaw.tracker import (  # noqa: E402
-    GetItemFromTracker, UploadWithTracker, PrepareStatsForTracker, SendDoneToTracker)
-from seesaw.externalprocess import RsyncUpload, WgetDownload, CurlUpload  # noqa: E402
-import differential_scenarios  # noqa: E402
+import differential_scenarios
+from seesaw.config import NumberConfigValue, realize
+from seesaw.externalprocess import CurlUpload, RsyncUpload, WgetDownload
+from seesaw.item import ItemInterpolation, ItemValue
+from seesaw.tracker import (
+    GetItemFromTracker,
+    PrepareStatsForTracker,
+    SendDoneToTracker,
+    UploadWithTracker,
+)
 
 api = {
-    "realize": realize, "NumberConfigValue": NumberConfigValue,
-    "ItemValue": ItemValue, "ItemInterpolation": ItemInterpolation,
-    "GetItemFromTracker": GetItemFromTracker, "UploadWithTracker": UploadWithTracker,
-    "PrepareStatsForTracker": PrepareStatsForTracker, "SendDoneToTracker": SendDoneToTracker,
-    "RsyncUpload": RsyncUpload, "WgetDownload": WgetDownload, "CurlUpload": CurlUpload,
+    "realize": realize,
+    "NumberConfigValue": NumberConfigValue,
+    "ItemValue": ItemValue,
+    "ItemInterpolation": ItemInterpolation,
+    "GetItemFromTracker": GetItemFromTracker,
+    "UploadWithTracker": UploadWithTracker,
+    "PrepareStatsForTracker": PrepareStatsForTracker,
+    "SendDoneToTracker": SendDoneToTracker,
+    "RsyncUpload": RsyncUpload,
+    "WgetDownload": WgetDownload,
+    "CurlUpload": CurlUpload,
 }
 
-import seesaw  # noqa: E402
+import seesaw
+
 result = {"_upstream_seesaw_version": seesaw.__version__, **differential_scenarios.outputs(api)}
 (HERE / "differential_golden.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
 print(f"wrote differential_golden.json from upstream seesaw {seesaw.__version__}")

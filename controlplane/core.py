@@ -14,8 +14,13 @@ from .supervisor import Supervisor
 
 
 class ControlPlane:
-    def __init__(self, config: ConfigStore, supervisor: Supervisor, hq: Any | None = None,
-                 stats: Any | None = None):
+    def __init__(
+        self,
+        config: ConfigStore,
+        supervisor: Supervisor,
+        hq: Any | None = None,
+        stats: Any | None = None,
+    ):
         self.config = config
         self.supervisor = supervisor
         self.hq = hq
@@ -30,8 +35,9 @@ class ControlPlane:
         if not gc.warrior_id:
             gc.warrior_id = await self.hq.register()
             self.config.save()
-        projects = await self.hq.heartbeat(gc.warrior_id, gc.downloader,
-                                           self.config.enabled_projects())
+        projects = await self.hq.heartbeat(
+            gc.warrior_id, gc.downloader, self.config.enabled_projects()
+        )
         self.supervisor.set_catalog(projects)
         await self.supervisor.reconcile()
         await self.supervisor.check_updates()
@@ -57,8 +63,12 @@ class ControlPlane:
 
     def stats_series(self, hours: float = 24.0, buckets: int = 48) -> dict:
         if self.stats is None:
-            return {"window_hours": hours, "bucket_seconds": 0, "buckets": [],
-                    "totals": {"items_done": 0, "items_failed": 0, "bytes": 0}}
+            return {
+                "window_hours": hours,
+                "bucket_seconds": 0,
+                "buckets": [],
+                "totals": {"items_done": 0, "items_failed": 0, "bytes": 0},
+            }
         return self.stats.series(hours=hours, buckets=buckets)
 
     def projects(self) -> dict:
@@ -78,7 +88,9 @@ class ControlPlane:
         await self.supervisor.reconcile()
 
     async def set_project_concurrency(self, name: str, concurrent_items: int | None) -> None:
-        self.config.project(name).concurrent_items = int(concurrent_items) if concurrent_items else None
+        self.config.project(name).concurrent_items = (
+            int(concurrent_items) if concurrent_items else None
+        )
         self.config.save()
         await self.supervisor.reconcile()
 

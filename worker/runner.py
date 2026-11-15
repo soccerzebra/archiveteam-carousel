@@ -13,8 +13,10 @@ Both compose cleanly because everything is just ``await``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from seesaw.context import RunContext
 from seesaw.item import Item
@@ -55,17 +57,14 @@ class Runner:
         self._stopped = True
 
     async def run(self) -> None:
-        workers = [asyncio.create_task(self._worker(i))
-                   for i in range(self.concurrent_items)]
+        workers = [asyncio.create_task(self._worker(i)) for i in range(self.concurrent_items)]
         ticker = asyncio.create_task(self._tick())
         try:
             await asyncio.gather(*workers)
         finally:
             ticker.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await ticker
-            except asyncio.CancelledError:
-                pass
 
     async def _tick(self) -> None:
         """Re-emit the thread snapshot periodically so the live log tail stays fresh even
@@ -80,8 +79,8 @@ class Runner:
             self._thread_begin(index, item)
             try:
                 await self.pipeline.run_item(
-                    item, self.ctx,
-                    on_task=lambda it, name, i=index: self._thread_step(i, it, name))
+                    item, self.ctx, on_task=lambda it, name, i=index: self._thread_step(i, it, name)
+                )
             except GracefulStop:
                 # The pipeline signalled "no more work for me" — leave this item unfinished
                 # and stop this worker.
@@ -109,8 +108,8 @@ class Runner:
             self._notify(item)
 
     # --- live per-thread tracking -----------------------------------------------------
-    LOG_TAIL = 6       # log lines reported per thread
-    LOG_WIDTH = 240    # max chars per reported line
+    LOG_TAIL = 6  # log lines reported per thread
+    LOG_WIDTH = 240  # max chars per reported line
 
     def _thread_begin(self, index: int, item: Any) -> None:
         # Keep the live Item so the snapshot can read its current log/bytes each tick.
@@ -132,16 +131,18 @@ class Runner:
         for i in sorted(self.threads):
             t = self.threads[i]
             item = t["item"]
-            out.append({
-                "slot": i,
-                "item_id": item.item_id,
-                "item_name": item.description(),
-                "task": t["task"],
-                "started": t["started"],
-                "bytes_up": int(item.get("carousel_bytes", 0)),
-                "bytes_down": 0,
-                "log": [ln[:self.LOG_WIDTH] for ln in item.log[-self.LOG_TAIL:]],
-            })
+            out.append(
+                {
+                    "slot": i,
+                    "item_id": item.item_id,
+                    "item_name": item.description(),
+                    "task": t["task"],
+                    "started": t["started"],
+                    "bytes_up": int(item.get("carousel_bytes", 0)),
+                    "bytes_down": 0,
+                    "log": [ln[: self.LOG_WIDTH] for ln in item.log[-self.LOG_TAIL :]],
+                }
+            )
         return out
 
     def _emit_threads(self) -> None:

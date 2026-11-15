@@ -10,8 +10,9 @@ from typing import Any
 
 
 class Project:
-    def __init__(self, title: str = "", project_html: str = "",
-                 utc_deadline: Any = None, **extra: Any):
+    def __init__(
+        self, title: str = "", project_html: str = "", utc_deadline: Any = None, **extra: Any
+    ):
         self.title = title
         self.project_html = project_html
         self.utc_deadline = utc_deadline

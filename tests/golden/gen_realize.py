@@ -18,12 +18,12 @@ HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 UPSTREAM = REPO / "reference" / "seesaw-kit"
 
-sys.path.insert(0, str(UPSTREAM))     # upstream seesaw (no Tornado needed for these modules)
+sys.path.insert(0, str(UPSTREAM))  # upstream seesaw (no Tornado needed for these modules)
 sys.path.insert(0, str(REPO / "tests"))
 
-from seesaw.config import realize, NumberConfigValue, StringConfigValue  # noqa: E402
-from seesaw.item import ItemValue, ItemInterpolation  # noqa: E402
-import realize_scenarios  # noqa: E402
+import realize_scenarios
+from seesaw.config import NumberConfigValue, StringConfigValue, realize
+from seesaw.item import ItemInterpolation, ItemValue
 
 if "worker" in {p.split("/")[-1] for p in sys.path}:
     raise SystemExit("refusing to run: our package is on the path, want upstream only")

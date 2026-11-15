@@ -19,8 +19,12 @@ SURFACE = {
     "seesaw.item": ["ItemValue", "ItemInterpolation"],
     "seesaw.task": ["SimpleTask", "LimitConcurrent"],
     "seesaw.externalprocess": ["ExternalProcess", "WgetDownload", "RsyncUpload", "CurlUpload"],
-    "seesaw.tracker": ["GetItemFromTracker", "PrepareStatsForTracker",
-                       "UploadWithTracker", "SendDoneToTracker"],
+    "seesaw.tracker": [
+        "GetItemFromTracker",
+        "PrepareStatsForTracker",
+        "UploadWithTracker",
+        "SendDoneToTracker",
+    ],
     "seesaw.config": ["realize", "NumberConfigValue", "StringConfigValue"],
     "seesaw.util": ["find_executable"],
 }
@@ -37,8 +41,10 @@ def test_every_imported_symbol_exists():
 
 
 def test_version_satisfies_project_gate():
-    import seesaw
     from distutils.version import StrictVersion  # projects use this exact check
+
+    import seesaw
+
     assert StrictVersion(seesaw.__version__) >= StrictVersion("0.8.5")
 
 

@@ -15,9 +15,10 @@ deliberate choices:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import os.path
-from typing import Any, Callable
+from typing import Any
 
 from seesaw.config import realize
 from seesaw.task import Task
@@ -31,11 +32,19 @@ class ExternalProcessError(Exception):
 
 
 class ExternalProcess(Task):
-    def __init__(self, name, args, max_tries=1, retry_delay=2,
-                 accept_on_exit_code=None, retry_on_exit_code=None, env=None):
+    def __init__(
+        self,
+        name,
+        args,
+        max_tries=1,
+        retry_delay=2,
+        accept_on_exit_code=None,
+        retry_on_exit_code=None,
+        env=None,
+    ):
         super().__init__(name)
         self.args = args
-        self.max_tries = max_tries           # None => unlimited
+        self.max_tries = max_tries  # None => unlimited
         self.retry_delay = retry_delay
         self.accept_on_exit_code = [0] if accept_on_exit_code is None else list(accept_on_exit_code)
         self.retry_on_exit_code = retry_on_exit_code  # None => retry on any non-accept code
@@ -63,14 +72,13 @@ class ExternalProcess(Task):
             if exit_code in self.accept_on_exit_code:
                 item.log_output(f"Finished {self.name} for {item.description()}.")
                 return
-            item.log_output(f"{self.name} returned exit code {exit_code} for "
-                            f"{item.description()}.")
+            item.log_output(f"{self.name} returned exit code {exit_code} for {item.description()}.")
             may_retry = self.max_tries is None or tries < self.max_tries
-            code_wants_retry = (self.retry_on_exit_code is None
-                                or exit_code in self.retry_on_exit_code)
+            code_wants_retry = (
+                self.retry_on_exit_code is None or exit_code in self.retry_on_exit_code
+            )
             if may_retry and code_wants_retry:
-                item.log_output(f"Retrying {self.name} after {self.retry_delay}s "
-                                f"(try {tries}).")
+                item.log_output(f"Retrying {self.name} after {self.retry_delay}s (try {tries}).")
                 await asyncio.sleep(self.retry_delay)
                 continue
             raise ExternalProcessError(self.name, exit_code)
@@ -89,16 +97,15 @@ class ExternalProcess(Task):
         async def feed_stdin() -> None:
             try:
                 data = self.stdin_data(item)
-                if data:
+                if data and proc.stdin is not None:
                     proc.stdin.write(data)
                     await proc.stdin.drain()
             except (BrokenPipeError, ConnectionResetError):
                 pass
             finally:
-                try:
-                    proc.stdin.close()
-                except Exception:
-                    pass
+                if proc.stdin is not None:
+                    with contextlib.suppress(Exception):
+                        proc.stdin.close()
 
         feeder = asyncio.create_task(feed_stdin())
         assert proc.stdout is not None
@@ -109,12 +116,22 @@ class ExternalProcess(Task):
 
 
 class WgetDownload(ExternalProcess):
-    def __init__(self, args, max_tries=1, accept_on_exit_code=None,
-                 retry_on_exit_code=None, env=None, stdin_data_function=None):
+    def __init__(
+        self,
+        args,
+        max_tries=1,
+        accept_on_exit_code=None,
+        retry_on_exit_code=None,
+        env=None,
+        stdin_data_function=None,
+    ):
         super().__init__(
-            "WgetDownload", args=args, max_tries=max_tries,
+            "WgetDownload",
+            args=args,
+            max_tries=max_tries,
             accept_on_exit_code=[0] if accept_on_exit_code is None else accept_on_exit_code,
-            retry_on_exit_code=retry_on_exit_code, env=env,
+            retry_on_exit_code=retry_on_exit_code,
+            env=env,
         )
         self.stdin_data_function = stdin_data_function
 
@@ -130,18 +147,24 @@ def _record_bytes(item: Any, paths: list) -> None:
     """
     total = 0
     for p in paths:
-        try:
+        with contextlib.suppress(OSError):
             total += os.path.getsize(p)
-        except OSError:
-            pass
     item["carousel_bytes"] = int(item.get("carousel_bytes", 0)) + total
 
 
 class RsyncUpload(ExternalProcess):
-    def __init__(self, target, files, target_source_path="./", bwlimit="0",
-                 max_tries=None, extra_args=None):
-        args = ["rsync", "-rltv", "--timeout=300", "--contimeout=300",
-                "--progress", "--bwlimit", bwlimit]
+    def __init__(
+        self, target, files, target_source_path="./", bwlimit="0", max_tries=None, extra_args=None
+    ):
+        args = [
+            "rsync",
+            "-rltv",
+            "--timeout=300",
+            "--contimeout=300",
+            "--progress",
+            "--bwlimit",
+            bwlimit,
+        ]
         if extra_args is not None:
             args.extend(extra_args)
         args.extend(["--files-from=-", target_source_path, target])
@@ -151,8 +174,7 @@ class RsyncUpload(ExternalProcess):
 
     def stdin_data(self, item: Any) -> bytes:
         base = realize(self.target_source_path, item)
-        lines = [f"{os.path.relpath(realize(f, item), base)}\n"
-                 for f in realize(self.files, item)]
+        lines = [f"{os.path.relpath(realize(f, item), base)}\n" for f in realize(self.files, item)]
         return "".join(lines).encode("utf-8")
 
     async def run(self, item: Any, ctx: Any) -> None:
@@ -161,15 +183,35 @@ class RsyncUpload(ExternalProcess):
 
 
 class CurlUpload(ExternalProcess):
-    def __init__(self, target, filename, connect_timeout="60", speed_limit="1",
-                 speed_time="900", max_tries=None):
-        args = ["curl", "--fail", "--output", "/dev/null",
-                "--connect-timeout", str(connect_timeout),
-                "--speed-limit", str(speed_limit),
-                "--speed-time", str(speed_time),
-                "--header", f"X-Curl-Limits: inf,{speed_limit},{speed_time}",
-                "--write-out", "Upload server: %{url_effective}\\n",
-                "--location", "--upload-file", filename, target]
+    def __init__(
+        self,
+        target,
+        filename,
+        connect_timeout="60",
+        speed_limit="1",
+        speed_time="900",
+        max_tries=None,
+    ):
+        args = [
+            "curl",
+            "--fail",
+            "--output",
+            "/dev/null",
+            "--connect-timeout",
+            str(connect_timeout),
+            "--speed-limit",
+            str(speed_limit),
+            "--speed-time",
+            str(speed_time),
+            "--header",
+            f"X-Curl-Limits: inf,{speed_limit},{speed_time}",
+            "--write-out",
+            "Upload server: %{url_effective}\\n",
+            "--location",
+            "--upload-file",
+            filename,
+            target,
+        ]
         super().__init__("CurlUpload", args=args, max_tries=max_tries)
         self.filename = filename
 

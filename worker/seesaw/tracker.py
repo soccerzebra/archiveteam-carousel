@@ -27,13 +27,14 @@ import enum
 import json
 import os.path
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any, ClassVar
 
 import seesaw
 from seesaw.config import realize
-from seesaw.task import Task, SimpleTask
-from seesaw.externalprocess import RsyncUpload, CurlUpload
+from seesaw.externalprocess import CurlUpload, RsyncUpload
+from seesaw.task import SimpleTask, Task
 
 # --- pure protocol layer -----------------------------------------------------------
 
@@ -42,8 +43,9 @@ _HTTP_TARGET = re.compile(r"^https?://.+/$")
 
 
 def user_agent() -> str:
-    return (f"ArchiveTeam Warrior/{seesaw.__version__} "
-            f"{seesaw.runner_type} {seesaw.warrior_build}").strip()
+    return (
+        f"ArchiveTeam Warrior/{seesaw.__version__} {seesaw.runner_type} {seesaw.warrior_build}"
+    ).strip()
 
 
 def request_headers() -> dict[str, str]:
@@ -52,16 +54,20 @@ def request_headers() -> dict[str, str]:
 
 class Status(enum.Enum):
     OK = "ok"
-    NO_ITEM = "no_item"           # 404
+    NO_ITEM = "no_item"  # 404
     RATE_LIMITED = "rate_limited"  # 420 / 429
-    OUT_OF_DATE = "out_of_date"    # 455 — project code needs upgrading
+    OUT_OF_DATE = "out_of_date"  # 455 — project code needs upgrading
     TRACKER_DOWN = "tracker_down"  # 599
-    ERROR = "error"                # anything else
+    ERROR = "error"  # anything else
 
 
-_STATUS_BY_CODE = {404: Status.NO_ITEM, 420: Status.RATE_LIMITED,
-                   429: Status.RATE_LIMITED, 455: Status.OUT_OF_DATE,
-                   599: Status.TRACKER_DOWN}
+_STATUS_BY_CODE = {
+    404: Status.NO_ITEM,
+    420: Status.RATE_LIMITED,
+    429: Status.RATE_LIMITED,
+    455: Status.OUT_OF_DATE,
+    599: Status.TRACKER_DOWN,
+}
 
 _STATUS_MESSAGE = {
     Status.NO_ITEM: "No item received. No items are available for this project right now.",
@@ -93,12 +99,12 @@ def classify(code: int) -> Classification:
 # Request body builders (mirror the tracker's `data()` contract). `item` lets lazy
 # values (ItemValue/ItemInterpolation) resolve; plain strings pass through unchanged.
 
+
 def request_body(downloader: Any, version: Any, item: Any = None) -> dict:
     return {"downloader": realize(downloader, item), "version": realize(version, item)}
 
 
-def upload_body(downloader: Any, item_name: str, version: Any = None,
-                item: Any = None) -> dict:
+def upload_body(downloader: Any, item_name: str, version: Any = None, item: Any = None) -> dict:
     body = {"downloader": realize(downloader, item), "item_name": item_name}
     if version:
         body["version"] = realize(version, item)
@@ -106,12 +112,15 @@ def upload_body(downloader: Any, item_name: str, version: Any = None,
 
 
 def release_body(downloader: Any, version: Any, items: Any, item: Any = None) -> dict:
-    return {"downloader": realize(downloader, item),
-            "version": realize(version, item),
-            "items": realize(items, item)}
+    return {
+        "downloader": realize(downloader, item),
+        "version": realize(version, item),
+        "items": realize(items, item),
+    }
 
 
 # Response parsers.
+
 
 def parse_request_response(body: str) -> dict | None:
     """Return the item payload (all keys get copied onto the item), or None if empty."""
@@ -121,7 +130,7 @@ def parse_request_response(body: str) -> dict | None:
 
 @dataclass(frozen=True)
 class UploadTarget:
-    uploader: str   # "rsync" | "curl"
+    uploader: str  # "rsync" | "curl"
     target: str
 
 
@@ -144,6 +153,7 @@ def done_ok(body: str) -> bool:
 
 # --- thin async client -------------------------------------------------------------
 
+
 class TrackerError(Exception):
     def __init__(self, classification: Classification):
         super().__init__(classification.message)
@@ -162,8 +172,9 @@ class TrackerClient:
     RETRY_STEP = 10
     RETRY_MAX = 300
 
-    def __init__(self, tracker_url: str, http,
-                 sleep: Callable[[float], Awaitable[None]] = asyncio.sleep):
+    def __init__(
+        self, tracker_url: str, http, sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+    ):
         self.tracker_url = tracker_url.rstrip("/")
         self._http = http
         self._sleep = sleep
@@ -191,8 +202,13 @@ class TrackerClient:
 
     # High-level operations ---------------------------------------------------------
 
-    _POLL = {Status.NO_ITEM, Status.RATE_LIMITED, Status.TRACKER_DOWN, Status.ERROR}
-    _TRANSIENT = {Status.RATE_LIMITED, Status.TRACKER_DOWN, Status.ERROR}
+    _POLL: ClassVar[set[Status]] = {
+        Status.NO_ITEM,
+        Status.RATE_LIMITED,
+        Status.TRACKER_DOWN,
+        Status.ERROR,
+    }
+    _TRANSIENT: ClassVar[set[Status]] = {Status.RATE_LIMITED, Status.TRACKER_DOWN, Status.ERROR}
 
     async def get_item(self, downloader, version, item=None) -> dict:
         """Poll /request until a work item is assigned. OUT_OF_DATE surfaces to the caller."""
@@ -212,30 +228,37 @@ class TrackerClient:
             delay = min(self.RETRY_MAX, delay + self.RETRY_STEP)
 
     async def upload(self, downloader, item_name, version=None, item=None) -> UploadTarget:
-        text = await self._request("upload", upload_body(downloader, item_name, version, item),
-                                   self._TRANSIENT)
+        text = await self._request(
+            "upload", upload_body(downloader, item_name, version, item), self._TRANSIENT
+        )
         target = parse_upload_target(text)
         if target is None:
-            raise TrackerError(Classification(
-                Status.ERROR, True, "Tracker did not provide a valid upload target."))
+            raise TrackerError(
+                Classification(Status.ERROR, True, "Tracker did not provide a valid upload target.")
+            )
         return target
 
     async def send_done(self, stats) -> bool:
         text = await self._request("done", stats, self._TRANSIENT)
         if not done_ok(text):
-            raise TrackerError(Classification(Status.ERROR, True,
-                                              f"Tracker responded unexpectedly: {text.strip()!r}"))
+            raise TrackerError(
+                Classification(
+                    Status.ERROR, True, f"Tracker responded unexpectedly: {text.strip()!r}"
+                )
+            )
         return True
 
     async def release(self, downloader, version, items, item=None) -> bool:
-        await self._request("release", release_body(downloader, version, items, item),
-                            self._TRANSIENT)
+        await self._request(
+            "release", release_body(downloader, version, items, item), self._TRANSIENT
+        )
         return True
 
 
 # --- seesaw-surface task classes ----------------------------------------------------
 # These are what projects import. They hold config, build the exact requests the contract
 # test pins, and execute via a TrackerClient over ctx.http.
+
 
 class GetItemFromTracker(Task):
     def __init__(self, tracker_url, downloader, version, item_filter=None):
@@ -259,10 +282,19 @@ class GetItemFromTracker(Task):
 
 
 class UploadWithTracker(Task):
-    def __init__(self, tracker_url, downloader, files, version=None,
-                 rsync_target_source_path="./", rsync_bwlimit="0",
-                 rsync_extra_args=(), curl_connect_timeout="60",
-                 curl_speed_limit="1", curl_speed_time="900"):
+    def __init__(
+        self,
+        tracker_url,
+        downloader,
+        files,
+        version=None,
+        rsync_target_source_path="./",
+        rsync_bwlimit="0",
+        rsync_extra_args=(),
+        curl_connect_timeout="60",
+        curl_speed_limit="1",
+        curl_speed_time="900",
+    ):
         super().__init__("UploadWithTracker")
         self.tracker_url = tracker_url
         self.downloader = downloader
@@ -286,15 +318,24 @@ class UploadWithTracker(Task):
         item.log_output(f"Uploading via {target.uploader} to {target.target}")
         if target.uploader == "rsync":
             uploader = RsyncUpload(
-                target.target, self.files,
+                target.target,
+                self.files,
                 target_source_path=self.rsync_target_source_path,
-                bwlimit=self.rsync_bwlimit, extra_args=self.rsync_extra_args, max_tries=1)
+                bwlimit=self.rsync_bwlimit,
+                extra_args=self.rsync_extra_args,
+                max_tries=1,
+            )
         else:  # curl — single file only
             if len(self.files) != 1:
                 raise ValueError("Curl upload target expects exactly one file.")
             uploader = CurlUpload(
-                target.target, self.files[0], self.curl_connect_timeout,
-                self.curl_speed_limit, self.curl_speed_time, max_tries=1)
+                target.target,
+                self.files[0],
+                self.curl_connect_timeout,
+                self.curl_speed_limit,
+                self.curl_speed_time,
+                max_tries=1,
+            )
         await uploader.run(item, ctx)
 
 

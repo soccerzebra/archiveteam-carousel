@@ -24,10 +24,10 @@ import pytest
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "worker"))
 
-import run_pipeline  # noqa: E402
-from seesaw.context import RunContext  # noqa: E402
-from seesaw.item import Item  # noqa: E402
-from seesaw.externalprocess import RsyncUpload  # noqa: E402
+import run_pipeline
+from seesaw.context import RunContext
+from seesaw.externalprocess import RsyncUpload
+from seesaw.item import Item
 
 CHAIN_PIPELINE = HERE / "fixtures" / "chain_project" / "pipeline.py"
 ORIGIN = b"hello-archive-team\n" * 500  # the bytes we "download" and then upload
@@ -88,11 +88,14 @@ def test_full_chain_claim_download_upload_done(tmp_path):
     base = f"http://127.0.0.1:{srv.server_address[1]}"
     try:
         _, pipeline = run_pipeline.load_pipeline(
-            str(CHAIN_PIPELINE), downloader="josh",
-            extra_context={"base_url": base, "data_root": str(tmp_path)})
+            str(CHAIN_PIPELINE),
+            downloader="josh",
+            extra_context={"base_url": base, "data_root": str(tmp_path)},
+        )
 
         async def go():
             import httpx
+
             async with httpx.AsyncClient(timeout=30) as http:
                 ctx = RunContext(http=http, data_dir=str(tmp_path), downloader="josh")
                 item = Item()
@@ -106,28 +109,35 @@ def test_full_chain_claim_download_upload_done(tmp_path):
     # 1. the item was claimed from the (fake) tracker
     assert item["item_name"] == "itm-1"
     # 2. download wrote the origin bytes to disk (real curl)
-    downloaded = pathlib.Path(item["data_dir"]) / f'{item["warc_file_base"]}.warc.zst'
+    downloaded = pathlib.Path(item["data_dir"]) / f"{item['warc_file_base']}.warc.zst"
     assert downloaded.read_bytes() == ORIGIN
     # 3. upload transferred identical bytes to the sink (real curl PUT)
     assert srv.uploads["demo-itm-1.warc.zst"] == ORIGIN
     # 4. done reported exact stats
     assert srv.done_body == {
-        "downloader": "josh", "version": "1.0", "item": "itm-1",
-        "bytes": {"data": len(ORIGIN)}, "id": "demo-itm-1",
+        "downloader": "josh",
+        "version": "1.0",
+        "item": "itm-1",
+        "bytes": {"data": len(ORIGIN)},
+        "id": "demo-itm-1",
     }
 
 
 @pytest.mark.skipif(not shutil.which("rsync"), reason="needs rsync")
 def test_rsync_real_transfer(tmp_path):
-    src = tmp_path / "src"; src.mkdir()
+    src = tmp_path / "src"
+    src.mkdir()
     (src / "a.warc.zst").write_bytes(b"x" * 1024)
     (src / "a_data.txt").write_bytes(b"y" * 32)
-    dest = tmp_path / "dest"; dest.mkdir()
+    dest = tmp_path / "dest"
+    dest.mkdir()
 
     task = RsyncUpload(
         str(dest) + "/",
         [str(src / "a.warc.zst"), str(src / "a_data.txt")],
-        target_source_path=str(src) + "/", max_tries=1)
+        target_source_path=str(src) + "/",
+        max_tries=1,
+    )
     asyncio.run(task.run(Item(None, {"item_name": "x"}), RunContext()))
 
     assert (dest / "a.warc.zst").read_bytes() == b"x" * 1024

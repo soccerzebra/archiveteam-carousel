@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 import subprocess
@@ -27,9 +28,9 @@ from typing import Any
 # run as a script, make sure `seesaw` (next to this file) is on the path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from seesaw.context import RunContext  # noqa: E402
-from seesaw.item import Item  # noqa: E402
-from runner import Runner  # noqa: E402
+from runner import Runner
+from seesaw.context import RunContext
+from seesaw.item import Item
 
 
 def emit(obj: dict) -> None:
@@ -120,33 +121,50 @@ async def run(args: argparse.Namespace) -> int:
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as http:
         ctx = RunContext(http=http, data_dir=args.data_dir, downloader=args.downloader)
-        runner = Runner(
-            pipeline, args.concurrent_items, ctx,
-            on_item_end=lambda item: emit({
-                "event": "item_end", "project": args.project,
-                "item": item.description(), "state": item.state,
-                "ok": item.state == Item.COMPLETED,
-                "error": getattr(item, "last_error", None),
-                "bytes": int(item.get("carousel_bytes", 0)),
-                "completed": runner.completed, "failed": runner.failed,
-            }),
-            on_threads=lambda threads: emit({
-                "event": "threads", "project": args.project, "threads": threads,
-            }),
+        runner: Runner = Runner(
+            pipeline,
+            args.concurrent_items,
+            ctx,
+            on_item_end=lambda item: emit(
+                {
+                    "event": "item_end",
+                    "project": args.project,
+                    "item": item.description(),
+                    "state": item.state,
+                    "ok": item.state == Item.COMPLETED,
+                    "error": getattr(item, "last_error", None),
+                    "bytes": int(item.get("carousel_bytes", 0)),
+                    "completed": runner.completed,
+                    "failed": runner.failed,
+                }
+            ),
+            on_threads=lambda threads: emit(
+                {
+                    "event": "threads",
+                    "project": args.project,
+                    "threads": threads,
+                }
+            ),
         )
 
         loop = asyncio.get_running_loop()
-        try:
+        # e.g. not the main thread / unsupported platform
+        with contextlib.suppress(NotImplementedError, RuntimeError):
             loop.add_signal_handler(__import__("signal").SIGINT, runner.stop)
-        except (NotImplementedError, RuntimeError):
-            pass  # e.g. not the main thread / unsupported platform
 
-        emit({"event": "running", "project": args.project,
-              "concurrent_items": args.concurrent_items})
+        emit(
+            {"event": "running", "project": args.project, "concurrent_items": args.concurrent_items}
+        )
         await runner.run()
 
-    emit({"event": "stopped", "project": args.project,
-          "completed": runner.completed, "failed": runner.failed})
+    emit(
+        {
+            "event": "stopped",
+            "project": args.project,
+            "completed": runner.completed,
+            "failed": runner.failed,
+        }
+    )
     return 0
 
 
@@ -157,8 +175,9 @@ def main() -> None:
     parser.add_argument("--downloader", required=True)
     parser.add_argument("--concurrent-items", type=int, default=1)
     parser.add_argument("--data-dir", default="/home/warrior/data")
-    parser.add_argument("--limit-rate", type=int, default=0,
-                        help="per-download cap in bytes/sec (0 = unlimited)")
+    parser.add_argument(
+        "--limit-rate", type=int, default=0, help="per-download cap in bytes/sec (0 = unlimited)"
+    )
     args = parser.parse_args()
     raise SystemExit(asyncio.run(run(args)))
 

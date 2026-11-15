@@ -31,6 +31,32 @@ packages = ["controlplane", "worker"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Vendored / study code is held to its own (upstream) standards, not ours.
+# tests/fixtures/*/pipeline.py are sample ArchiveTeam projects that mirror upstream
+# quirks (exec-time magic globals, %-format, assert False) — treated like vendored code.
+extend-exclude = ["reference", "data", "*.egg-info", "tests/fixtures"]
+
+[tool.ruff.lint]
+# Pragmatic set: pyflakes/pycodestyle errors + import sorting (I, replaces isort),
+# likely bugs (B), py3.11 modernization (UP), simplifications (SIM, C4), ruff-native (RUF).
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "RUF"]
+# UP042: `class X(str, Enum)` is deliberate here (stable JSON/pydantic serialization);
+# StrEnum would change `str(member)` and risk wire-protocol compatibility.
+ignore = ["UP042"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests import after a sys.path insert (E402) and use `assert False, "..."` as a
+# "should have raised" sentinel (B011) — both normal in test code, never run under -O.
+"tests/**" = ["E402", "B011"]
+
+[tool.mypy]
+python_version = "3.11"
+# First-party only; vendored terroroftinytown (data/) and reference/ are Py2-era.
+files = ["controlplane", "worker"]
+ignore_missing_imports = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+# Non-strict to start. Tighten per-module with [[tool.mypy.overrides]] as code is annotated.
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -18,19 +18,29 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "worker"))
 sys.path.insert(0, str(HERE))
 
-from seesaw.config import realize, NumberConfigValue  # noqa: E402
-from seesaw.item import ItemValue, ItemInterpolation  # noqa: E402
-from seesaw.tracker import (  # noqa: E402
-    GetItemFromTracker, UploadWithTracker, PrepareStatsForTracker, SendDoneToTracker)
-from seesaw.externalprocess import RsyncUpload, WgetDownload, CurlUpload  # noqa: E402
-import differential_scenarios  # noqa: E402
+import differential_scenarios
+from seesaw.config import NumberConfigValue, realize
+from seesaw.externalprocess import CurlUpload, RsyncUpload, WgetDownload
+from seesaw.item import ItemInterpolation, ItemValue
+from seesaw.tracker import (
+    GetItemFromTracker,
+    PrepareStatsForTracker,
+    SendDoneToTracker,
+    UploadWithTracker,
+)
 
 OUR_API = {
-    "realize": realize, "NumberConfigValue": NumberConfigValue,
-    "ItemValue": ItemValue, "ItemInterpolation": ItemInterpolation,
-    "GetItemFromTracker": GetItemFromTracker, "UploadWithTracker": UploadWithTracker,
-    "PrepareStatsForTracker": PrepareStatsForTracker, "SendDoneToTracker": SendDoneToTracker,
-    "RsyncUpload": RsyncUpload, "WgetDownload": WgetDownload, "CurlUpload": CurlUpload,
+    "realize": realize,
+    "NumberConfigValue": NumberConfigValue,
+    "ItemValue": ItemValue,
+    "ItemInterpolation": ItemInterpolation,
+    "GetItemFromTracker": GetItemFromTracker,
+    "UploadWithTracker": UploadWithTracker,
+    "PrepareStatsForTracker": PrepareStatsForTracker,
+    "SendDoneToTracker": SendDoneToTracker,
+    "RsyncUpload": RsyncUpload,
+    "WgetDownload": WgetDownload,
+    "CurlUpload": CurlUpload,
 }
 
 GOLDEN = json.loads((HERE / "golden" / "differential_golden.json").read_text())
