@@ -1,0 +1,33 @@
+# Carousel — one control-plane container that supervises a worker per active project.
+#
+# Quick start (uses the published image):
+#   docker compose up -d
+#   open http://localhost:8001   # then set a downloader handle in Settings
+#
+# The image is multi-arch (linux/amd64 and linux/arm64), so it runs natively on x86 servers,
+# Apple Silicon and ARM boards alike. The ./data volume holds config, project checkouts, WARCs,
+# and the stats DB — back it up / relocate it as you like.
+name: carousel
+
+services:
+  carousel:
+    image: ghcr.io/soccerzebra/archiveteam-carousel:latest
+    # To build locally instead of pulling, comment out `image:` above and uncomment this
+    # (one image, one build — no base step):
+    # build:
+    #   context: .
+    #   dockerfile: docker/Dockerfile
+    container_name: carousel
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./data:/home/warrior
+    restart: unless-stopped
+    # Run a tiny init as PID 1 so orphaned wget/rsync children are reaped and signals are
+    # forwarded to carousel.
+    init: true
+    # Optional overrides (all have sane defaults):
+    # environment:
+    #   PORT: "8001"       # also change the container side of `ports:` above to match
+    #   WARRIOR_HQ: "https://warriorhq.archiveteam.org"
+    # The health check is baked into the image and follows PORT.
