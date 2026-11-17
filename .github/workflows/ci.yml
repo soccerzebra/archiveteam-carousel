@@ -1,0 +1,79 @@
+name: CI
+
+# Runs on pull requests, and as a required first job of publish.yml (workflow_call) for
+# pushes to master and release tags — so nothing is published unless these checks pass.
+on:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+# A newer push to the same PR supersedes the run in progress. When called from publish.yml
+# the group is keyed on that workflow's name, and nothing is cancelled.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          # Reproducible: install the exact locked set, then the package without re-resolving.
+          pip install -r requirements-dev.txt
+          pip install -e . --no-deps
+
+      - name: Format check (ruff)
+        run: ruff format --check .
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Type check (mypy)
+        run: mypy
+
+      - name: Tests (pytest, with coverage)
+        # Coverage is reported but never gates the build (no --cov-fail-under).
+        run: pytest --cov --cov-report=term-missing
+
+  # Build the image (no push) so a Dockerfile regression fails the PR, not a release tag.
+  # PRs only: when called from publish.yml, its own build-and-push is the same check.
+  # Each architecture builds natively; the cache scopes match publish.yml's.
+  docker-build:
+    if: github.event_name == 'pull_request'
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v4
+      - name: Build image (${{ matrix.platform }})
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: false
+          cache-from: type=gha,scope=image-${{ matrix.arch }}
+          cache-to: type=gha,scope=image-${{ matrix.arch }},mode=max

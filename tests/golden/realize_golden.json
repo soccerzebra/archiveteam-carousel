@@ -1,0 +1,18 @@
+{
+  "interp_stats_file": "/data/urls/abc123/urls-20261027-000000-abcd.warc.zst",
+  "interp_upload_file": "/data/urls/abc123/data/urls-20261027-000000-abcd.urls.42.warc.zst",
+  "itemvalue": "urls-20261027-000000-abcd",
+  "nested_env": {
+    "item_dir": "/data/urls/abc123",
+    "static": "x",
+    "warc_file_base": "urls-20261027-000000-abcd"
+  },
+  "nested_list": [
+    "/data/urls/abc123/data/",
+    "url:12345",
+    "literal"
+  ],
+  "number_default": 2,
+  "passthrough_int": 7,
+  "passthrough_str": "literal"
+}

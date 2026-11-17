@@ -1,0 +1,63 @@
+name: catalog-compat
+
+# Deterministically verify that our one shared wget-at build (the published :edge image, built
+# from docker/Dockerfile) can still run every project in the live Warrior HQ catalog. Catches
+# the day ArchiveTeam ships a project needing a newer toolchain than we bake — the job goes red
+# with the specific project + reason, and we bump WGET_AT_COMMIT/WGET_AT_VERSION (or move to
+# per-project extraction).
+#
+# Runs weekly and on demand. Needs only Docker (preinstalled on the ubuntu runner) + stdlib.
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"   # Mondays 07:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read          # to pull our own :edge image from GHCR
+  issues: write           # so a failing scheduled run can open a tracking issue
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check catalog wget-at compatibility
+        id: check
+        # `shell: bash` runs with pipefail, so the checker's exit status (not tee's) decides
+        # whether this step — and so the job — fails.
+        shell: bash
+        run: |
+          python3 tools/check_catalog_compat.py --json \
+            --base "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/archiveteam-carousel:edge" | tee compat.out
+
+      - name: Open an issue if a project is incompatible
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          title="Catalog wget-at incompatibility detected"
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # One tracking issue at a time: if it's already open, add this run to it.
+          existing=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Still failing: $run_url"
+            exit 0
+          fi
+          gh label create automated --color ededed --description "Opened by a workflow" 2>/dev/null || true
+          gh issue create \
+            --title "$title" \
+            --label automated \
+            --body "The weekly catalog-compat check failed: a project in the live HQ catalog needs a wget-at our image doesn't provide. See the run log for the specific project(s) and reason, then bump WGET_AT_COMMIT and WGET_AT_VERSION in docker/Dockerfile (or move to per-project extraction).
+
+          Run: $run_url"
