@@ -55,6 +55,7 @@ The fuller design and upstream analysis are in [`ARCHITECTURE.md`](ARCHITECTURE.
 - `controlplane/` — the new web UI, API, supervisor, HQ client, config (zero seesaw).
 - `worker/` — the per-project execution unit; hosts the Python pipeline API.
 - `docker/` — the single image (worker runtime + control plane).
+- `hints/` — `hints.json`, the published "likely inactive" list (see below).
 - `reference/` — upstream repos we study (gitignored, not shipped).
 
 ## Web dashboard
@@ -73,6 +74,15 @@ project at once:
 - **Stats over time** — a bucketed chart of data archived and items done/failed over the last
   24h, plus totals, backed by an on-disk SQLite history (`STATS_DB`, default
   `$WARRIOR_HOME/projects/stats.db`) that survives restarts.
+- **Likely inactive** — HQ keeps listing projects long after their tracker runs dry. Those
+  are moved into a collapsed group at the bottom of the projects list, based on
+  [`hints/hints.json`](hints/hints.json), which clients fetch from this repo at boot and every
+  6 hours (ETag-revalidated, cached in `$WARRIOR_HOME/projects/hints-cache.json`, with a copy
+  bundled in the image). Editing that file on `master` updates every client; no release
+  needed. Hints are display-only: a listed project can still be enabled, a running one just
+  gets a badge, and anything HQ is currently auto-picking is treated as active. A failed or
+  malformed fetch keeps the previous list. Set `CAROUSEL_HINTS_URL` to point elsewhere, or to
+  an empty string to never fetch.
 
 ## Development
 

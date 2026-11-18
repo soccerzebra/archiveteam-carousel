@@ -230,6 +230,13 @@
            font-weight:600; padding:2px 7px; border-radius:5px; letter-spacing:.02em;
            color:var(--signal); background:var(--signal-soft); vertical-align:middle; }
   .attag.off { color:var(--muted); background:var(--chip); }
+  .attag.idle { color:var(--warn); background:color-mix(in srgb,var(--warn) 14%,transparent); }
+  details.inactive-group { margin-top:6px; border-top:1px solid var(--line); }
+  details.inactive-group > summary { cursor:pointer; padding:12px 2px; color:var(--muted); font-size:12.5px;
+           font-weight:600; letter-spacing:.01em; list-style-position:inside; }
+  details.inactive-group > summary:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+  details.inactive-group .hint { font-weight:400; margin-left:6px; }
+  details.inactive-group .proj { opacity:.72; }
   .proj .src { font-family:"IBM Plex Mono",monospace; font-size:10.5px; color:var(--muted);
                border:1px solid var(--line); border-radius:6px; padding:2px 7px; margin-left:8px; vertical-align:middle; }
   .proj .pdesc { white-space:normal; margin-top:2px; }
@@ -685,6 +692,7 @@ function renderStatus(s) {
 let enabledSet = new Set();
 let projectLogos = {};  // project name -> logo url, for the dashboard worker rows
 let projectLeaderboards = {};  // project name -> leaderboard url
+let inactiveOpen = false;  // keep the "Likely inactive" group open across live re-renders
 function renderProjects(p) {
   enabledSet = new Set(p.enabled || []);
   projectLogos = {};
@@ -699,7 +707,19 @@ function renderProjects(p) {
   const list = (p.projects || []).filter(pr =>
     (pr.name + ' ' + (pr.title || '')).toLowerCase().includes(filter));
   box.innerHTML = list.length ? '' : '<p class="empty">No matching projects.</p>';
-  for (const proj of list) {
+  // Hinted-inactive projects you aren't running sink into a collapsed group at the bottom;
+  // ones you are running stay in the main list with a badge (hints never stop anything).
+  const sunk = list.filter(pr => pr.likely_inactive && !enabledSet.has(pr.name));
+  const main = list.filter(pr => !sunk.includes(pr));
+  let group = null;
+  if (sunk.length) {
+    group = document.createElement('details');
+    group.className = 'inactive-group';
+    group.open = inactiveOpen || (!!filter && !main.length);
+    group.innerHTML = `<summary>Likely inactive (${sunk.length})<span class="hint">· no items on the tracker lately; still available if they come back</span></summary>`;
+    group.ontoggle = () => { inactiveOpen = group.open; };
+  }
+  for (const proj of [...main, ...sunk]) {
     const on = enabledSet.has(proj.name);
     const div = document.createElement('div');
     div.className = 'proj';
@@ -711,21 +731,25 @@ function renderProjects(p) {
     const tag = atPick
       ? `<span class="attag${optout ? ' off' : ''}" title="${optout ? "An ArchiveTeam's Choice pick you turned off — toggle on to follow it again" : "Run by ArchiveTeam's Choice — toggle off to skip just this one"}">AT's Choice${optout ? ' · off' : ''}</span>`
       : '';
+    const idle = proj.likely_inactive
+      ? `<span class="attag idle" title="${esc(proj.inactive_note || 'Probably out of items')}">${on ? 'may be out of items' : 'likely inactive'}</span>`
+      : '';
     div.innerHTML = `
       <label class="switch">
         <input type="checkbox" ${on?'checked':''} data-name="${esc(proj.name)}">
         <span class="slider"></span></label>
       ${logo}
       <div style="flex:1;min-width:0">
-        <div class="title">${esc(proj.title || proj.name)}${tag}<span class="src">${esc(proj.source)}</span>${lbLink(proj.leaderboard, 'Leaderboard')}</div>
+        <div class="title">${esc(proj.title || proj.name)}${tag}${idle}<span class="src">${esc(proj.source)}</span>${lbLink(proj.leaderboard, 'Leaderboard')}</div>
         ${proj.description ? `<div class="meta pdesc">${esc(proj.description)}</div>` : ''}
         <div class="meta">${esc(proj.name)}</div>
       </div>
       ${on ? `<label class="meta">threads
         <input type="number" min="1" max="6" style="width:66px" value="${proj.concurrent_items || ''}"
           placeholder="${(lastStatus && lastStatus.default_project_threads) || 1}" data-conc="${esc(proj.name)}"></label>` : ''}`;
-    box.appendChild(div);
+    (group && sunk.includes(proj) ? group : box).appendChild(div);
   }
+  if (group) box.appendChild(group);
   box.querySelectorAll('input[data-name]').forEach(cb => cb.onchange = async () => {
     const name = cb.dataset.name;
     await fetch(`/api/projects/${name}/${cb.checked ? 'enable' : 'disable'}`, {method:'POST'});

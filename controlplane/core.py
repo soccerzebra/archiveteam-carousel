@@ -21,15 +21,23 @@ class ControlPlane:
         supervisor: Supervisor,
         hq: Any | None = None,
         stats: Any | None = None,
+        hints: Any | None = None,
     ):
         self.config = config
         self.supervisor = supervisor
         self.hq = hq
         self.stats = stats
+        self.hints = hints  # HintsClient: remote "likely inactive" list (display only)
         self._auto_projects: list[str] = []  # ArchiveTeam's current picks (last heartbeat)
 
-    async def heartbeat_once(self) -> None:
-        """Register (first time), fetch the HQ catalog, then reconcile workers."""
+    async def heartbeat_once(self, force_hints: bool = False) -> None:
+        """Register (first time), fetch the HQ catalog, then reconcile workers.
+
+        Also refreshes the remote hints on their own slower interval (``force_hints`` skips
+        the wait, e.g. for a manual refresh). Hints never fail the heartbeat.
+        """
+        if self.hints is not None:
+            await self.hints.maybe_refresh(force=force_hints)
         if self.hq is None:
             await self.supervisor.reconcile()
             return
@@ -107,6 +115,8 @@ class ControlPlane:
         enabled = set(self.config.enabled_projects())
         auto = set(self._auto_projects) if self.config.global_config.archiveteam_choice else set()
         forced = self.supervisor.forced  # AT picks minus opt-outs (empty when mode off)
+        inactive = self.hints.inactive if self.hints is not None else {}
+        hq_picks = set(self._auto_projects)  # HQ picking it means it's live, mode on or off
         rows = []
         for p in self.supervisor.catalog.values():
             row = p.model_dump()
@@ -116,6 +126,10 @@ class ControlPlane:
             # running when manually enabled OR force-run by AT (opt-outs already excluded)
             row["enabled"] = p.name in enabled or p.name in forced
             row["concurrent_items"] = pc.concurrent_items if pc else None
+            # Display-only demotion from the remote hints; never affects what runs.
+            hint = inactive.get(p.name) if p.name not in hq_picks else None
+            row["likely_inactive"] = hint is not None
+            row["inactive_note"] = (hint or {}).get("note", "")
             rows.append(row)
         return {"projects": rows, "enabled": [r["name"] for r in rows if r["enabled"]]}
 

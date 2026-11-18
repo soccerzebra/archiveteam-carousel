@@ -30,4 +30,5 @@ services:
     # environment:
     #   PORT: "8001"       # also change the container side of `ports:` above to match
     #   WARRIOR_HQ: "https://warriorhq.archiveteam.org"
+    #   CAROUSEL_HINTS_URL: ""   # empty = never fetch the remote "likely inactive" list
     # The health check is baked into the image and follows PORT.

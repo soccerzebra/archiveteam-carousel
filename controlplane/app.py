@@ -151,7 +151,7 @@ def create_app(
 
     @app.post("/api/refresh")
     async def refresh() -> JSONResponse:
-        await cp.heartbeat_once()
+        await cp.heartbeat_once(force_hints=True)
         return JSONResponse(cp.status())
 
     @app.post("/api/stop")
@@ -184,6 +184,7 @@ def create_app(
 def main() -> None:
     import uvicorn
 
+    from .hints import DEFAULT_HINTS_URL, HintsClient
     from .hq import HQClient
     from .projects import ProjectInstaller
     from .stats import StatsStore
@@ -213,7 +214,12 @@ def main() -> None:
         data_dir=str(home / "data"),
     )
     hq = HQClient(os.environ.get("WARRIOR_HQ", "https://warriorhq.archiveteam.org"))
-    cp = ControlPlane(config, supervisor, hq, stats=stats)
+    # CAROUSEL_HINTS_URL overrides where hints come from; set it empty to never fetch them.
+    hints = HintsClient(
+        url=os.environ.get("CAROUSEL_HINTS_URL", DEFAULT_HINTS_URL),
+        cache_path=home / "projects" / "hints-cache.json",
+    )
+    cp = ControlPlane(config, supervisor, hq, stats=stats, hints=hints)
 
     app = create_app(cp)
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8001")))

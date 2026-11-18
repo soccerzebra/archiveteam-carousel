@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "updated": "2026-11-17",
+  "inactive": {
+    "microsoftupdate": { "note": "Tracker queue empty", "since": "2026-11-17" },
+    "pastebin": { "note": "Tracker queue empty", "since": "2026-11-17" },
+    "recursive": { "note": "Tracker queue empty", "since": "2026-11-17" },
+    "twitch": { "note": "Tracker queue empty", "since": "2026-11-17" },
+    "wikimediaetherpad": { "note": "Finished: tracker queue empty", "since": "2026-11-17" }
+  }
+}

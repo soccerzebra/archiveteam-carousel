@@ -226,6 +226,7 @@ WORKDIR /opt/carousel
 COPY pyproject.toml ./
 COPY controlplane/ ./controlplane/
 COPY web/ ./web/
+COPY hints/ ./hints/
 RUN python3 -m pip install --no-cache-dir --no-deps --no-build-isolation -e .
 
 WORKDIR /home/warrior

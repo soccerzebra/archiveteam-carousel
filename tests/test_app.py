@@ -230,3 +230,32 @@ def test_at_choice_optout_disables_one_pick(tmp_path):
         client.post("/api/projects/urls/enable")
         assert cp.config.project("urls").at_optout is False
         assert "urls" in cp.supervisor.forced
+
+
+class StaticHints:
+    def __init__(self, inactive):
+        self.inactive = inactive
+        self.refreshes = []
+
+    async def maybe_refresh(self, force=False):
+        self.refreshes.append(force)
+        return False
+
+
+def test_projects_flag_likely_inactive_unless_hq_picks_it(tmp_path):
+    client, cp = make_client(tmp_path)
+    cp.hints = StaticHints(
+        {"reddit": {"note": "done", "since": ""}, "urls": {"note": "", "since": ""}}
+    )
+    cp._auto_projects = ["urls"]  # HQ picking it overrides the hint, even with the mode off
+    with client:
+        rows = {p["name"]: p for p in client.get("/api/projects").json()["projects"]}
+        assert rows["reddit"]["likely_inactive"] is True
+        assert rows["reddit"]["inactive_note"] == "done"
+        assert rows["urls"]["likely_inactive"] is False
+        # Enabling a hinted project still works; hints are display-only.
+        client.post("/api/projects/reddit/enable")
+        assert "reddit" in cp.config.enabled_projects()
+        # Manual refresh forces a hints fetch.
+        client.post("/api/refresh")
+    assert cp.hints.refreshes == [True]
